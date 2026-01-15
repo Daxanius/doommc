@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["doom-worker", "doom-server", "doomgeneric-rs", "doom-protocol"]

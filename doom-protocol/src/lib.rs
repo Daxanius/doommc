@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::palette::PALETTE_MAPPING;
 
 pub mod palette;
@@ -5,7 +7,42 @@ pub mod palette;
 pub const MAP_WIDTH: usize = 128;
 pub const MAP_HEIGHT: usize = 128;
 
-pub struct Frame([u8; MAP_WIDTH * MAP_HEIGHT]);
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ToChild {
+    Input { input: Input, pressed: bool },
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ToParent {
+    Frame(Frame),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Frame(pub [u8; MAP_WIDTH * MAP_HEIGHT]);
+
+impl<'de> Deserialize<'de> for Frame {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let vec: Vec<u8> = Deserialize::deserialize(deserializer)?;
+        let mut array = [0u8; MAP_WIDTH * MAP_HEIGHT];
+        if vec.len() != MAP_WIDTH * MAP_HEIGHT {
+            return Err(serde::de::Error::custom("invalid frame data length"));
+        }
+        array.copy_from_slice(&vec);
+        Ok(Frame(array))
+    }
+}
+
+impl Serialize for Frame {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.to_vec().serialize(serializer)
+    }
+}
 
 impl Frame {
     #[must_use]
@@ -37,7 +74,8 @@ impl Frame {
     }
 }
 
-enum Input {
+#[derive(Serialize, Deserialize, Debug)]
+pub enum Input {
     Up,
     Down,
     Left,

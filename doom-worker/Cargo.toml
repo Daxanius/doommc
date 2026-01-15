@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 doomgeneric = { path = "../doomgeneric-rs" }
 doom-protocol = { path = "../doom-protocol" }
+postcard = { version = "1.0", features = ["alloc"] }
+mpsc = "0.2.6"

@@ -1,15 +1,11 @@
 use doom_server::{DoomSession, DoomSessionAllocator};
 use valence::{
-    inventory::{self, InventoryPlugin, UpdateSelectedSlotEvent},
-    log::LogPlugin,
-    nbt::Tag,
-    network::NetworkPlugin,
+    inventory::UpdateSelectedSlotEvent,
     prelude::*,
     protocol::{
         packets::play::{map_update_s2c::Data, MapUpdateS2c},
-        Packet, VarInt, WritePacket,
+        VarInt, WritePacket,
     },
-    status::StatusPlugin,
 };
 
 fn main() {
@@ -108,25 +104,24 @@ fn tick_all_sessions(mut q: Query<(&mut Client, &mut DoomSession)>) {
             continue;
         }
 
-        // 128x128 = 16384 bytes. Each byte is a map color index.
-        let pixels = vec![rand::random::<u8>(); 128 * 128];
+        if let Ok(mut frame_lock) = session.latest_frame.try_lock() {
+            if let Some(frame) = frame_lock.take() {
+                let pkt = MapUpdateS2c {
+                    map_id: VarInt(session.id()),
+                    scale: 0,
+                    locked: true,
+                    icons: None,
+                    data: Some(Data {
+                        columns: 128,
+                        rows: 128,
+                        position: [0, 0],
+                        data: &frame.0,
+                    }),
+                };
 
-        // let mut item = inventory.slot(40).unwrap().clone();
-
-        let pkt = MapUpdateS2c {
-            map_id: VarInt(session.id()),
-            scale: 0,
-            locked: true,
-            icons: None,
-            data: Some(Data {
-                columns: 128,
-                rows: 128,
-                position: [0, 0],
-                data: &pixels,
-            }),
-        };
-
-        client.write_packet(&pkt);
+                client.write_packet(&pkt);
+            }
+        }
     }
 }
 

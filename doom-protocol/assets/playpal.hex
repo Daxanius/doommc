@@ -166,6 +166,7 @@ af7b1f
 9b5b13
 874307
 732b00
+ffffff
 ffdbdb
 ffbbbb
 ff9b9b
@@ -182,11 +183,13 @@ bf0000
 b30000
 a70000
 9b0000
-8b0000
+9b0000
 7f0000
 730000
 670000
 5b0000
+4f0000
+430000
 e7e7ff
 c7c7ff
 ababff
@@ -203,6 +206,7 @@ ababff
 000083
 00006b
 000053
+ffffff
 ffebdb
 ffd7bb
 ffc79b
@@ -218,8 +222,9 @@ cb5707
 c34f00
 b74700
 af4300
+ffffff
 ffffd7
-ffffb3
+ffffd7
 ffff8f
 ffff6b
 ffff47
@@ -233,12 +238,14 @@ a73f00
 432f1b
 372313
 2f1b0b
+000053
 000047
 00003b
 00002f
 000023
 000017
 00000b
+000000
 ff9f43
 ffe74b
 ff7bff

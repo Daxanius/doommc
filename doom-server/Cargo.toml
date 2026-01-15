@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 doom-protocol = { path = "../doom-protocol" }
+valence = "0.1.0"

@@ -44,10 +44,10 @@ fn main() {
         }
     }
 
-    // --- Compute mapping using linear RGB distance (looks better than naive sRGB) ---
+    // Compute mapping using linear RGB distance (looks better than naive sRGB)
     let mapping = compute_mapping_linear_rgb(&doom, &mc);
 
-    // --- Emit Rust source into OUT_DIR ---
+    // Emit Rust source into OUT_DIR
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let out_path = out_dir.join("palette_mapping.rs");
 

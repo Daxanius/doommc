@@ -1,14 +1,25 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+pub mod palette;
+
+struct Frame([u8; 128 * 128]);
+
+enum Input {
+    Up,
+    Down,
+    Left,
+    Right,
+    Shoot,
+    Use,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl Input {
+    pub fn to_keycode(&self) -> i32 {
+        match self {
+            Input::Up => 200,
+            Input::Down => 208,
+            Input::Left => 203,
+            Input::Right => 205,
+            Input::Shoot => 57, // space
+            Input::Use => 17,   // W
+        }
     }
 }

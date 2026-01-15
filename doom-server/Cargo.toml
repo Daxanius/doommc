@@ -1,8 +1,9 @@
 [package]
 name = "doom-server"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 doom-protocol = { path = "../doom-protocol" }
-valence = "0.1.0"
+valence = "0.2.0-alpha.1+mc.1.20.1"
+uuid = "1.19.0"

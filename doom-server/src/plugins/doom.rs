@@ -27,7 +27,7 @@ impl Plugin for DoomPlugin {
             Update,
             (
                 init_clients_with_session,
-                deallocate_maps,
+                cleanup_disconnected_clients,
                 freeze_controllers,
                 handle_controller_sneak,
                 handle_controller_move,
@@ -318,12 +318,18 @@ fn init_clients_with_session(
     }
 }
 
-fn deallocate_maps(
-    mut doom_session_allocator: ResMut<DoomMapAllocator>,
-    despawned_clients: Query<&DoomSession, With<Despawned>>,
+pub fn cleanup_disconnected_clients(
+    mut alloc: ResMut<DoomMapAllocator>,
+    query: Query<&DoomSession>,
+    mut disconnected_clients: RemovedComponents<Client>,
 ) {
-    for session in &despawned_clients {
-        doom_session_allocator.free(session.id);
+    for entity in disconnected_clients.read() {
+        let Ok(session) = query.get(entity) else {
+            continue;
+        };
+
+        println!("Deallocating DOOM session {}", session.id());
+        alloc.free(session.id());
     }
 }
 

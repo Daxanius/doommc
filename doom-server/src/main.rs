@@ -137,7 +137,7 @@ fn detect_player_stop(server: Res<Server>, mut q: Query<(&mut DoomSession, &Move
     let current_tick = server.current_tick();
 
     for (mut session, tracker) in &mut q {
-        if current_tick > tracker.last_tick + 20 {
+        if current_tick > tracker.last_tick + 10 {
             session.set_input(Input::Up, false);
             session.set_input(Input::Down, false);
             session.set_input(Input::Left, false);

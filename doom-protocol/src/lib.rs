@@ -10,6 +10,7 @@ pub const MAP_HEIGHT: usize = 128;
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ToChild {
     Input { input: Input, pressed: bool },
+    State { active: bool },
 }
 
 #[derive(Serialize, Deserialize, Debug)]

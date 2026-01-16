@@ -3,10 +3,8 @@ use std::net::SocketAddr;
 use doom_protocol::Input;
 use doom_server::{DoomSession, DoomSessionAllocator};
 use valence::{
-    entity::{item_frame::Rotation, Velocity},
     hand_swing::HandSwingEvent,
     math::Vec3Swizzles,
-    message::ChatMessageEvent,
     movement::MovementEvent,
     network::{BroadcastToLan, CleanupFn, HandshakeData, ServerListPing},
     prelude::*,

@@ -44,8 +44,7 @@ fn main() {
         }
     }
 
-    // Compute mapping using linear RGB distance (looks better than naive sRGB)
-    let mapping = compute_mapping_linear_rgb(&doom, &mc);
+    let mapping = compute_mapping_rgb(&doom, &mc);
 
     // Emit Rust source into OUT_DIR
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -89,7 +88,7 @@ fn dist2_oklab(a: (u8, u8, u8), b: (u8, u8, u8)) -> f32 {
     dl * dl + da * da + db * db
 }
 
-fn compute_mapping_linear_rgb(doom: &[(u8, u8, u8)], mc: &[(u8, u8, u8)]) -> Vec<u8> {
+fn compute_mapping_rgb(doom: &[(u8, u8, u8)], mc: &[(u8, u8, u8)]) -> Vec<u8> {
     let mut mapping = Vec::with_capacity(doom.len());
     for &dc in doom {
         let mut best_j = 0usize;

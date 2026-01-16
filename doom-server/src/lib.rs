@@ -128,13 +128,15 @@ impl DoomSession {
         self.set_input(input, !is_pressed);
     }
 
-    pub fn set_active(&mut self, active: bool) {
+    /// Returns true if the active state was changed
+    pub fn set_active(&mut self, active: bool) -> bool {
         if self.active == active {
-            return;
+            return false;
         }
 
         self.active = active;
         let _ = self.input_tx.send(ToChild::State { active });
+        true
     }
 }
 

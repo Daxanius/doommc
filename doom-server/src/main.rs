@@ -100,10 +100,7 @@ fn init_clients(
         pos.set([0.5, 65.0, 0.5]);
 
         let (doom_session, map) = doom_session_allocator.create_session();
-        commands
-            .entity(player)
-            .insert(doom_session)
-            .insert(MovementTracker::default());
+        commands.entity(player).insert(doom_session);
         inventory.set_slot(40, map);
         *game_mode = GameMode::Creative;
     }
@@ -119,11 +116,21 @@ pub struct MovementTracker {
     pub moving_back: bool,
     pub strafing_left: bool,
     pub strafing_right: bool,
+    pub freeze_position: DVec3,
 }
 
-fn freeze_player(mut q: Query<&mut Position, With<MovementTracker>>) {
-    for mut position in &mut q {
-        position.0 = DVec3::new(0.0, 65.0, 0.0);
+impl MovementTracker {
+    pub fn new(freeze_position: DVec3) -> Self {
+        Self {
+            freeze_position,
+            ..Default::default()
+        }
+    }
+}
+
+fn freeze_player(mut q: Query<(&mut Position, &MovementTracker)>) {
+    for (mut position, tracker) in &mut q {
+        position.0 = tracker.freeze_position;
     }
 }
 
@@ -248,15 +255,27 @@ fn on_player_sneak(mut ev: EventReader<SneakEvent>, mut q: Query<&mut DoomSessio
 }
 
 fn on_slot_selected(
+    mut commands: Commands,
     mut ev: EventReader<UpdateSelectedSlotEvent>,
-    mut q: Query<(&mut DoomSession, &mut Inventory)>,
+    mut q: Query<(Entity, &mut DoomSession, &Inventory, &Position)>,
 ) {
     for e in &mut ev.read() {
-        let Ok((mut session, inventory)) = q.get_mut(e.client) else {
+        let Ok((player, mut session, inventory, position)) = q.get_mut(e.client) else {
             continue;
         };
 
-        session.set_active(inventory.slot((e.slot + 36).into()).item == ItemKind::FilledMap);
+        let active = inventory.slot((e.slot + 36).into()).item == ItemKind::FilledMap;
+        let state_changed = session.set_active(active);
+
+        if state_changed {
+            if active {
+                commands
+                    .entity(player)
+                    .insert(MovementTracker::new(position.0));
+            } else {
+                commands.entity(player).remove::<MovementTracker>();
+            }
+        }
     }
 }
 

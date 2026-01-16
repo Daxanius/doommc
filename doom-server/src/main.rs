@@ -3,7 +3,9 @@ use std::net::SocketAddr;
 use doom_protocol::Input;
 use doom_server::{DoomSession, DoomSessionAllocator};
 use valence::{
+    entity::abstract_fireball::Item,
     hand_swing::HandSwingEvent,
+    inventory::{self, UpdateSelectedSlotEvent},
     math::Vec3Swizzles,
     movement::MovementEvent,
     network::{BroadcastToLan, CleanupFn, HandshakeData, ServerListPing},
@@ -31,6 +33,7 @@ fn main() {
         .add_systems(Update, freeze_player)
         .add_systems(Update, tick_all_sessions)
         .add_systems(Update, detect_player_stop)
+        .add_systems(Update, on_slot_selected)
         .insert_resource(DoomSessionAllocator::default())
         .run();
 }
@@ -241,6 +244,19 @@ fn on_player_sneak(mut ev: EventReader<SneakEvent>, mut q: Query<&mut DoomSessio
         let down = e.state == SneakState::Start;
         session.set_input(Input::Shoot, down);
         session.set_input(Input::Enter, down);
+    }
+}
+
+fn on_slot_selected(
+    mut ev: EventReader<UpdateSelectedSlotEvent>,
+    mut q: Query<(&mut DoomSession, &mut Inventory)>,
+) {
+    for e in &mut ev.read() {
+        let Ok((mut session, inventory)) = q.get_mut(e.client) else {
+            continue;
+        };
+
+        session.set_active(inventory.slot((e.slot + 36).into()).item == ItemKind::FilledMap);
     }
 }
 

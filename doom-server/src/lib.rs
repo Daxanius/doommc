@@ -102,7 +102,7 @@ impl DoomSession {
 
         Self {
             id,
-            active: true,
+            active: false,
             latest_frame,
             input_tx,
             child_handle: child,
@@ -111,7 +111,7 @@ impl DoomSession {
     }
 
     pub fn set_input(&mut self, input: doom_protocol::Input, pressed: bool) {
-        if self.pressed_keys.contains(&input) == pressed {
+        if !self.active || self.pressed_keys.contains(&input) == pressed {
             return;
         }
 
@@ -126,6 +126,15 @@ impl DoomSession {
     pub fn toggle_input(&mut self, input: doom_protocol::Input) {
         let is_pressed = self.pressed_keys.contains(&input);
         self.set_input(input, !is_pressed);
+    }
+
+    pub fn set_active(&mut self, active: bool) {
+        if self.active == active {
+            return;
+        }
+
+        self.active = active;
+        let _ = self.input_tx.send(ToChild::State { active });
     }
 }
 

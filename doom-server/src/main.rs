@@ -1,8 +1,14 @@
 use std::net::SocketAddr;
 
+use doom_protocol::Input;
 use doom_server::{DoomSession, DoomSessionAllocator};
 use valence::{
+    hand_swing::HandSwingEvent,
+    interact_item::InteractItemEvent,
     inventory::UpdateSelectedSlotEvent,
+    math::Vec3Swizzles,
+    message::ChatMessageEvent,
+    movement::MovementEvent,
     network::{BroadcastToLan, CleanupFn, HandshakeData, ServerListPing},
     prelude::*,
     protocol::{
@@ -20,10 +26,15 @@ fn main() {
             ..Default::default()
         })
         .add_systems(Startup, setup)
-        .add_systems(Update, (despawn_disconnected_clients,))
+        .add_systems(Update, despawn_disconnected_clients)
+        .add_systems(Update, on_player_sneak)
         .add_systems(Update, init_clients)
+        .add_systems(Update, on_player_interact)
         .add_systems(Update, on_selected_slot_changed)
+        .add_systems(Update, on_player_move)
         .add_systems(Update, tick_all_sessions)
+        .add_systems(Update, input_on_message)
+        .add_systems(Update, detect_player_stop)
         .insert_resource(DoomSessionAllocator::default())
         .run();
 }
@@ -44,9 +55,11 @@ fn setup(
     }
 
     // This actually sets the block in the world.
-    layer
-        .chunk
-        .set_block([0, 64, 0], BlockState::WHITE_CONCRETE);
+    for z in -10..10 {
+        for x in -10..10 {
+            layer.chunk.set_block([x, 64, z], BlockState::RED_CONCRETE);
+        }
+    }
 
     // This spawns the layer into the world.
     commands.spawn(layer);
@@ -64,6 +77,7 @@ fn init_clients(
             &mut VisibleEntityLayers,
             &mut Position,
             &mut Inventory,
+            &mut GameMode,
         ),
         Added<Client>,
     >,
@@ -76,6 +90,7 @@ fn init_clients(
         mut visible_entity_layers,
         mut pos,
         mut inventory,
+        mut game_mode,
     ) in &mut clients
     {
         let layer = layers.single();
@@ -86,8 +101,12 @@ fn init_clients(
         pos.set([0.5, 65.0, 0.5]);
 
         let (doom_session, map) = doom_session_allocator.create_session();
-        commands.entity(player).insert(doom_session);
+        commands
+            .entity(player)
+            .insert(doom_session)
+            .insert(MovementTracker { last_tick: 0 });
         inventory.set_slot(40, Some(map));
+        *game_mode = GameMode::Creative;
     }
 }
 
@@ -102,6 +121,75 @@ fn on_selected_slot_changed(
             let stack = inv.slot(slot_id); // whatever accessor you use
 
             session.active = matches!(stack, Some(s) if is_doom_map(s));
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct MovementTracker {
+    pub last_tick: i64,
+}
+
+fn detect_player_stop(server: Res<Server>, mut q: Query<(&mut DoomSession, &MovementTracker)>) {
+    let current_tick = server.current_tick();
+
+    for (mut session, tracker) in &mut q {
+        if current_tick > tracker.last_tick + 20 {
+            session.set_input(Input::Up, false);
+            session.set_input(Input::Down, false);
+            session.set_input(Input::Left, false);
+            session.set_input(Input::Right, false);
+        }
+    }
+}
+
+fn on_player_move(
+    mut ev: EventReader<MovementEvent>,
+    server: Res<Server>,
+    mut q: Query<(&mut Position, &mut DoomSession, &mut MovementTracker)>,
+) {
+    for e in &mut ev {
+        for (mut pos, mut session, mut tracker) in &mut q {
+            let delta = e.position - e.old_position;
+
+            // Calculate local direction vectors from Yaw
+            let yaw_rad = e.look.yaw.to_radians();
+            let forward_v = Vec2::new(-yaw_rad.sin(), -yaw_rad.cos()).normalize();
+            let right_v = Vec2::new(-yaw_rad.cos(), yaw_rad.sin()).normalize();
+
+            // Project movement onto our local vectors
+            let forward_dot = delta.xz().dot(forward_v.as_dvec2());
+            let right_dot = delta.xz().dot(right_v.as_dvec2());
+
+            // Thresholds to trigger the Enum inputs
+            let threshold = 0.05;
+
+            // Send Forward/Backward
+            session.set_input(Input::Up, forward_dot < -threshold);
+            session.set_input(Input::Down, forward_dot > threshold);
+
+            session.set_input(Input::Right, right_dot > threshold);
+            session.set_input(Input::Left, right_dot < -threshold);
+
+            pos.set(e.old_position);
+            tracker.last_tick = server.current_tick();
+        }
+    }
+}
+
+fn on_player_sneak(mut ev: EventReader<SneakEvent>, mut q: Query<&mut DoomSession>) {
+    for e in &mut ev {
+        for mut session in &mut q {
+            session.set_input(Input::Shoot, e.state == SneakState::Start);
+            session.set_input(Input::Enter, e.state == SneakState::Start);
+        }
+    }
+}
+
+fn on_player_interact(mut ev: EventReader<HandSwingEvent>, mut q: Query<&mut DoomSession>) {
+    for _e in &mut ev {
+        for mut session in &mut q {
+            session.toggle_input(Input::Use);
         }
     }
 }
@@ -135,6 +223,25 @@ fn tick_all_sessions(mut q: Query<(&mut Client, &mut DoomSession)>) {
 
 fn is_doom_map(stack: &ItemStack) -> bool {
     stack.item == ItemKind::FilledMap
+}
+
+fn input_on_message(mut events: EventReader<ChatMessageEvent>, mut q: Query<&mut DoomSession>) {
+    for event in &mut events {
+        for mut session in &mut q {
+            let message = event.message.trim();
+
+            match message {
+                "w" => session.toggle_input(Input::Up),
+                "s" => session.toggle_input(Input::Down),
+                "a" => session.toggle_input(Input::Left),
+                "d" => session.toggle_input(Input::Right),
+                "x" => session.toggle_input(Input::Shoot),
+                "e" => session.toggle_input(Input::Use),
+                "f" => session.toggle_input(Input::Enter),
+                _ => (),
+            }
+        }
+    }
 }
 
 struct CallBacks;

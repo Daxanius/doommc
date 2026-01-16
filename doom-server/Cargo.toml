@@ -8,6 +8,7 @@ doom-protocol = { path = "../doom-protocol" }
 valence = { version = "0.2.0-alpha.1+mc.1.20.1", features = [
     "inventory",
     "network",
+    "player_list",
 ] }
 postcard = { version = "1.0", features = ["alloc"] }
 mpsc = "0.2.6"

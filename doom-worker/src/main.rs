@@ -1,5 +1,7 @@
 use doom_protocol::{Frame, ToChild, ToParent};
 use doomgeneric::game::DoomGeneric;
+use doomgeneric::input::KeyData;
+use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver};
@@ -8,7 +10,7 @@ use std::thread;
 struct DoomHandler {
     input_rx: Receiver<ToChild>,
     stream: TcpStream,
-    current_keys: std::collections::HashMap<i32, bool>,
+    key_queue: VecDeque<KeyData>,
 }
 
 impl DoomHandler {
@@ -16,7 +18,7 @@ impl DoomHandler {
         Self {
             input_rx,
             stream,
-            current_keys: std::collections::HashMap::new(),
+            key_queue: VecDeque::new(),
         }
     }
 }
@@ -48,12 +50,16 @@ impl DoomGeneric for DoomHandler {
     }
 
     fn get_key(&mut self) -> Option<doomgeneric::input::KeyData> {
-        // Drain the channel to update local key state
+        // Pull everything from the channel and put it in our local queue
         while let Ok(ToChild::Input { input, pressed }) = self.input_rx.try_recv() {
-            self.current_keys.insert(input.to_keycode(), pressed);
+            self.key_queue.push_back(KeyData {
+                pressed,
+                key: input.to_keycode(),
+            });
         }
 
-        None
+        // Return the next event in the queue to Doom
+        self.key_queue.pop_front()
     }
 
     fn set_window_title(&mut self, _title: &str) {

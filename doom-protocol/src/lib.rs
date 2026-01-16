@@ -74,7 +74,7 @@ impl Frame {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Input {
     Up,
     Down,
@@ -82,17 +82,24 @@ pub enum Input {
     Right,
     Shoot,
     Use,
+    Enter,
+    StraftLeft,
+    StraftRight,
 }
 
 impl Input {
+    #[must_use]
     pub fn to_keycode(&self) -> i32 {
         match self {
-            Input::Up => 200,
-            Input::Down => 208,
-            Input::Left => 203,
-            Input::Right => 205,
-            Input::Shoot => 57, // space
-            Input::Use => 17,   // W
+            Input::Up => 0xad,
+            Input::Down => 0xaf,
+            Input::Left => 0xac,
+            Input::Right => 0xae,
+            Input::Shoot => 0xa3,
+            Input::Use => 0xa2,
+            Input::Enter => 13,
+            Input::StraftLeft => 0xa0,
+            Input::StraftRight => 0xa1,
         }
     }
 }

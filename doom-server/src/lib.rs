@@ -18,6 +18,8 @@ pub struct DoomSession {
     pub input_tx: Sender<ToChild>,
     // Keep handle to child process so it doesn't drop
     pub child_handle: Child,
+
+    pressed_keys: Vec<doom_protocol::Input>,
 }
 
 impl DoomSession {
@@ -36,7 +38,7 @@ impl DoomSession {
         worker_path.push("doom-worker");
 
         // Debug print to see exactly what we are trying to run
-        println!("Spawning worker at: {:?}", worker_path);
+        println!("Spawning worker at: {worker_path:?}");
 
         let child = Command::new(&worker_path) // Use the full validated path
             .arg(format!("127.0.0.1:{port}"))
@@ -104,7 +106,26 @@ impl DoomSession {
             latest_frame,
             input_tx,
             child_handle: child,
+            pressed_keys: Vec::new(),
         }
+    }
+
+    pub fn set_input(&mut self, input: doom_protocol::Input, pressed: bool) {
+        if self.pressed_keys.contains(&input) == pressed {
+            return;
+        }
+
+        let _ = self.input_tx.send(ToChild::Input { input, pressed });
+        if pressed {
+            self.pressed_keys.push(input);
+        } else {
+            self.pressed_keys.retain(|&k| k != input);
+        }
+    }
+
+    pub fn toggle_input(&mut self, input: doom_protocol::Input) {
+        let is_pressed = self.pressed_keys.contains(&input);
+        self.set_input(input, !is_pressed);
     }
 }
 

@@ -83,8 +83,8 @@ pub enum Input {
     Shoot,
     Use,
     Enter,
-    StraftLeft,
-    StraftRight,
+    StrafeLeft,
+    StrafeRight,
 }
 
 impl Input {
@@ -98,8 +98,8 @@ impl Input {
             Input::Shoot => 0xa3,
             Input::Use => 0xa2,
             Input::Enter => 13,
-            Input::StraftLeft => 0xa0,
-            Input::StraftRight => 0xa1,
+            Input::StrafeLeft => 0xa0,
+            Input::StrafeRight => 0xa1,
         }
     }
 }

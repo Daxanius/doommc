@@ -3,9 +3,8 @@ use std::net::SocketAddr;
 use doom_protocol::Input;
 use doom_server::{DoomSession, DoomSessionAllocator};
 use valence::{
+    entity::{item_frame::Rotation, Velocity},
     hand_swing::HandSwingEvent,
-    interact_item::InteractItemEvent,
-    inventory::UpdateSelectedSlotEvent,
     math::Vec3Swizzles,
     message::ChatMessageEvent,
     movement::MovementEvent,
@@ -30,10 +29,9 @@ fn main() {
         .add_systems(Update, on_player_sneak)
         .add_systems(Update, init_clients)
         .add_systems(Update, on_player_interact)
-        .add_systems(Update, on_selected_slot_changed)
         .add_systems(Update, on_player_move)
+        .add_systems(Update, freeze_player)
         .add_systems(Update, tick_all_sessions)
-        .add_systems(Update, input_on_message)
         .add_systems(Update, detect_player_stop)
         .insert_resource(DoomSessionAllocator::default())
         .run();
@@ -104,30 +102,28 @@ fn init_clients(
         commands
             .entity(player)
             .insert(doom_session)
-            .insert(MovementTracker { last_tick: 0 });
+            .insert(MovementTracker::default());
         inventory.set_slot(40, Some(map));
         *game_mode = GameMode::Creative;
     }
 }
 
-fn on_selected_slot_changed(
-    mut ev: EventReader<UpdateSelectedSlotEvent>,
-    mut q: Query<(&Inventory, &mut DoomSession)>,
-) {
-    for e in &mut ev {
-        for (inv, mut session) in &mut q {
-            println!("Player selected slot {:?}", e.slot);
-            let slot_id = u16::from(e.slot);
-            let stack = inv.slot(slot_id); // whatever accessor you use
-
-            session.active = matches!(stack, Some(s) if is_doom_map(s));
-        }
-    }
-}
-
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct MovementTracker {
     pub last_tick: i64,
+    pub last_yaw: f32,
+    pub turning_left: bool,
+    pub turning_right: bool,
+    pub moving_forward: bool,
+    pub moving_back: bool,
+    pub strafing_left: bool,
+    pub strafing_right: bool,
+}
+
+fn freeze_player(mut q: Query<(&mut Position, With<MovementTracker>)>) {
+    for (mut position) in &mut q {
+        position.0 .0 = DVec3::new(0.0, 65.0, 0.0);
+    }
 }
 
 fn detect_player_stop(server: Res<Server>, mut q: Query<(&mut DoomSession, &MovementTracker)>) {
@@ -143,54 +139,120 @@ fn detect_player_stop(server: Res<Server>, mut q: Query<(&mut DoomSession, &Move
     }
 }
 
+fn wrap_degrees(mut d: f32) -> f32 {
+    while d > 180.0 {
+        d -= 360.0;
+    }
+    while d < -180.0 {
+        d += 360.0;
+    }
+    d
+}
+
 fn on_player_move(
     mut ev: EventReader<MovementEvent>,
     server: Res<Server>,
-    mut q: Query<(&mut Position, &mut DoomSession, &mut MovementTracker)>,
+    mut q: Query<(&mut DoomSession, &mut MovementTracker)>,
 ) {
-    for e in &mut ev {
-        for (mut pos, mut session, mut tracker) in &mut q {
-            let delta = e.position - e.old_position;
+    const TURN_ON: f32 = 3.0;
+    const TURN_OFF: f32 = 1.5;
+    const MOVE_ON: f64 = 0.03;
+    const MOVE_OFF: f64 = 0.015;
 
-            // Calculate local direction vectors from Yaw
-            let yaw_rad = e.look.yaw.to_radians();
-            let forward_v = Vec2::new(-yaw_rad.sin(), -yaw_rad.cos()).normalize();
-            let right_v = Vec2::new(-yaw_rad.cos(), yaw_rad.sin()).normalize();
+    for e in ev.iter() {
+        let Ok((mut session, mut tr)) = q.get_mut(e.client) else {
+            continue;
+        };
 
-            // Project movement onto our local vectors
-            let forward_dot = delta.xz().dot(forward_v.as_dvec2());
-            let right_dot = delta.xz().dot(right_v.as_dvec2());
+        // turn from yaw delta
+        let dyaw = wrap_degrees(e.look.yaw - tr.last_yaw);
 
-            // Thresholds to trigger the Enum inputs
-            let threshold = 0.05;
+        let turn_right = if tr.turning_right {
+            dyaw > TURN_OFF
+        } else {
+            dyaw > TURN_ON
+        };
+        let turn_left = if tr.turning_left {
+            dyaw < -TURN_OFF
+        } else {
+            dyaw < -TURN_ON
+        };
 
-            // Send Forward/Backward
-            session.set_input(Input::Up, forward_dot < -threshold);
-            session.set_input(Input::Down, forward_dot > threshold);
+        tr.turning_right = turn_right;
+        tr.turning_left = turn_left;
 
-            session.set_input(Input::Right, right_dot > threshold);
-            session.set_input(Input::Left, right_dot < -threshold);
+        session.set_input(Input::Right, turn_right);
+        session.set_input(Input::Left, turn_left);
 
-            pos.set(e.old_position);
-            tracker.last_tick = server.current_tick();
-        }
+        tr.last_yaw = e.look.yaw;
+
+        // movement intent from delta
+        let delta = e.position - e.old_position;
+
+        let yaw = e.look.yaw.to_radians();
+        let forward = Vec2::new(-yaw.sin(), yaw.cos()).normalize();
+        let right = -Vec2::new(yaw.cos(), yaw.sin()).normalize();
+
+        let f = delta.xz().dot(forward.as_dvec2());
+        let r = delta.xz().dot(right.as_dvec2());
+
+        let forward_on = if tr.moving_forward {
+            f > MOVE_OFF
+        } else {
+            f > MOVE_ON
+        };
+        let back_on = if tr.moving_back {
+            f < -MOVE_OFF
+        } else {
+            f < -MOVE_ON
+        };
+
+        tr.moving_forward = forward_on;
+        tr.moving_back = back_on;
+
+        session.set_input(Input::Up, forward_on);
+        session.set_input(Input::Down, back_on);
+
+        let strafe_r = if tr.strafing_right {
+            r > MOVE_OFF
+        } else {
+            r > MOVE_ON
+        };
+        let strafe_l = if tr.strafing_left {
+            r < -MOVE_OFF
+        } else {
+            r < -MOVE_ON
+        };
+
+        tr.strafing_right = strafe_r;
+        tr.strafing_left = strafe_l;
+
+        session.set_input(Input::StrafeRight, strafe_r);
+        session.set_input(Input::StrafeLeft, strafe_l);
+
+        tr.last_tick = server.current_tick();
     }
 }
 
 fn on_player_sneak(mut ev: EventReader<SneakEvent>, mut q: Query<&mut DoomSession>) {
     for e in &mut ev {
-        for mut session in &mut q {
-            session.set_input(Input::Shoot, e.state == SneakState::Start);
-            session.set_input(Input::Enter, e.state == SneakState::Start);
-        }
+        let Ok(mut session) = q.get_mut(e.client) else {
+            continue;
+        };
+
+        let down = e.state == SneakState::Start;
+        session.set_input(Input::Shoot, down);
+        session.set_input(Input::Enter, down);
     }
 }
 
 fn on_player_interact(mut ev: EventReader<HandSwingEvent>, mut q: Query<&mut DoomSession>) {
-    for _e in &mut ev {
-        for mut session in &mut q {
-            session.toggle_input(Input::Use);
-        }
+    for e in &mut ev {
+        let Ok(mut session) = q.get_mut(e.client) else {
+            continue;
+        };
+
+        session.toggle_input(Input::Use);
     }
 }
 
@@ -216,29 +278,6 @@ fn tick_all_sessions(mut q: Query<(&mut Client, &mut DoomSession)>) {
                 };
 
                 client.write_packet(&pkt);
-            }
-        }
-    }
-}
-
-fn is_doom_map(stack: &ItemStack) -> bool {
-    stack.item == ItemKind::FilledMap
-}
-
-fn input_on_message(mut events: EventReader<ChatMessageEvent>, mut q: Query<&mut DoomSession>) {
-    for event in &mut events {
-        for mut session in &mut q {
-            let message = event.message.trim();
-
-            match message {
-                "w" => session.toggle_input(Input::Up),
-                "s" => session.toggle_input(Input::Down),
-                "a" => session.toggle_input(Input::Left),
-                "d" => session.toggle_input(Input::Right),
-                "x" => session.toggle_input(Input::Shoot),
-                "e" => session.toggle_input(Input::Use),
-                "f" => session.toggle_input(Input::Enter),
-                _ => (),
             }
         }
     }

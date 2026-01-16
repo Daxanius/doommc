@@ -86,7 +86,7 @@ impl NetworkCallbacks for CallBacks {
     async fn server_list_ping(
         &self,
         _shared: &SharedNetworkState,
-        remote_addr: SocketAddr,
+        _remote_addr: SocketAddr,
         handshake_data: &HandshakeData,
     ) -> ServerListPing {
         ServerListPing::Respond {

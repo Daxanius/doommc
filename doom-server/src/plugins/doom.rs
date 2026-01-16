@@ -22,11 +22,12 @@ impl Plugin for DoomPlugin {
     fn build(&self, app: &mut App) {
         #[rustfmt::skip]
         app
-        .insert_resource(DoomSessionAllocator::default())
+        .insert_resource(DoomMapAllocator::default())
         .add_systems(
             Update,
             (
                 init_clients_with_session,
+                deallocate_maps,
                 freeze_controllers,
                 handle_controller_sneak,
                 handle_controller_move,
@@ -191,14 +192,15 @@ impl Drop for DoomSession {
     }
 }
 
-#[derive(Resource, Default)]
-pub struct DoomSessionAllocator {
+#[derive(Resource)]
+pub struct DoomMapAllocator {
     next_id: i32,
     free_ids: Vec<i32>,
     in_use: HashSet<i32>,
 }
 
-impl DoomSessionAllocator {
+/// Uses negative map IDs for DOOM sessions
+impl DoomMapAllocator {
     #[must_use]
     pub fn create_session(&mut self) -> (DoomSession, ItemStack) {
         let id = self.alloc();
@@ -210,11 +212,13 @@ impl DoomSessionAllocator {
         (DoomSession::from_id(id), map)
     }
 
+    /// Used to reserve maps that don't need to be attached to a DOOM session
+    /// will prevent the ID from accidentally being reused
     #[must_use]
     pub fn alloc(&mut self) -> i32 {
         let id = self.free_ids.pop().unwrap_or_else(|| {
             let id = self.next_id;
-            self.next_id += 1;
+            self.next_id -= 1;
             id
         });
 
@@ -232,6 +236,16 @@ impl DoomSessionAllocator {
         }
 
         self.free_ids.push(id);
+    }
+}
+
+impl Default for DoomMapAllocator {
+    fn default() -> Self {
+        Self {
+            next_id: -1,
+            free_ids: Vec::new(),
+            in_use: HashSet::new(),
+        }
     }
 }
 
@@ -292,16 +306,24 @@ impl DoomController {
     }
 }
 
-#[allow(clippy::type_complexity)]
 fn init_clients_with_session(
     mut commands: Commands,
-    mut doom_session_allocator: ResMut<DoomSessionAllocator>,
+    mut doom_session_allocator: ResMut<DoomMapAllocator>,
     mut clients: Query<(Entity, &mut Inventory), Added<Client>>,
 ) {
     for (player, mut inventory) in &mut clients {
         let (doom_session, map) = doom_session_allocator.create_session();
         commands.entity(player).insert(doom_session);
         inventory.set_slot(40, map);
+    }
+}
+
+fn deallocate_maps(
+    mut doom_session_allocator: ResMut<DoomMapAllocator>,
+    despawned_clients: Query<&DoomSession, With<Despawned>>,
+) {
+    for session in &despawned_clients {
+        doom_session_allocator.free(session.id);
     }
 }
 

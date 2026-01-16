@@ -78,30 +78,15 @@ fn parse_hex_palette(string: &str) -> Vec<(u8, u8, u8)> {
     out
 }
 
-fn srgb_to_linear(c: u8) -> f32 {
-    let x = f32::from(c) / 255.0;
-    if x <= 0.04045 {
-        x / 12.92
-    } else {
-        ((x + 0.055) / 1.055).powf(2.4)
-    }
-}
+fn dist2_oklab(a: (u8, u8, u8), b: (u8, u8, u8)) -> f32 {
+    let c1 = oklab::srgb_to_oklab([a.0, a.1, a.2].into());
+    let c2 = oklab::srgb_to_oklab([b.0, b.1, b.2].into());
 
-fn dist2_linear(a: (u8, u8, u8), b: (u8, u8, u8)) -> f32 {
-    let (ar, ag, ab) = (
-        srgb_to_linear(a.0),
-        srgb_to_linear(a.1),
-        srgb_to_linear(a.2),
-    );
-    let (br, bg, bb) = (
-        srgb_to_linear(b.0),
-        srgb_to_linear(b.1),
-        srgb_to_linear(b.2),
-    );
-    let dr = ar - br;
-    let dg = ag - bg;
-    let db = ab - bb;
-    dr * dr + dg * dg + db * db
+    let dl = c1.l - c2.l;
+    let da = c1.a - c2.a;
+    let db = c1.b - c2.b;
+
+    dl * dl + da * da + db * db
 }
 
 fn compute_mapping_linear_rgb(doom: &[(u8, u8, u8)], mc: &[(u8, u8, u8)]) -> Vec<u8> {
@@ -110,7 +95,7 @@ fn compute_mapping_linear_rgb(doom: &[(u8, u8, u8)], mc: &[(u8, u8, u8)]) -> Vec
         let mut best_j = 0usize;
         let mut best_d = f32::INFINITY;
         for (j, &mc_c) in mc.iter().enumerate() {
-            let d = dist2_linear(dc, mc_c);
+            let d = dist2_oklab(dc, mc_c);
             if d < best_d {
                 best_d = d;
                 best_j = j;

@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use doom_protocol::Input;
 use doom_server::{DoomSession, DoomSessionAllocator};
 use valence::{
-    entity::abstract_fireball::Item,
     hand_swing::HandSwingEvent,
     inventory::{self, UpdateSelectedSlotEvent},
     math::Vec3Swizzles,

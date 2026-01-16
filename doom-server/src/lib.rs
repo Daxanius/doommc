@@ -37,14 +37,17 @@ impl DoomSession {
         #[cfg(not(target_os = "windows"))]
         worker_path.push("doom-worker");
 
-        // Debug print to see exactly what we are trying to run
-        println!("Spawning worker at: {worker_path:?}");
-
         let child = Command::new(&worker_path) // Use the full validated path
             .arg(format!("127.0.0.1:{port}"))
             .stderr(Stdio::inherit())
             .spawn()
             .unwrap_or_else(|e| panic!("Failed to start worker at {worker_path:?}: {e}"));
+
+        println!(
+            "Created Doom worker with PID {} for session {}",
+            child.id(),
+            id
+        );
 
         let (stream, _) = listener.accept().expect("Worker failed to connect");
 
@@ -66,7 +69,7 @@ impl DoomSession {
         let mut reader_stream = stream.try_clone().expect("Failed to clone stream");
         let mut writer_stream = stream;
 
-        // 1. READER THREAD (TCP -> Latest Frame)
+        // READER THREAD (TCP -> Latest Frame)
         std::thread::spawn(move || {
             use std::io::Read;
             loop {
@@ -88,7 +91,7 @@ impl DoomSession {
             }
         });
 
-        // 2. WRITER THREAD (Channel -> TCP)
+        // WRITER THREAD (Channel -> TCP)
         std::thread::spawn(move || {
             use std::io::Write;
             while let Ok(msg) = input_rx.recv() {
@@ -137,6 +140,17 @@ impl DoomSession {
         self.active = active;
         let _ = self.input_tx.send(ToChild::State { active });
         true
+    }
+}
+
+impl Drop for DoomSession {
+    fn drop(&mut self) {
+        println!(
+            "Killing Doom worker with PID {} for session {}",
+            self.child_handle.id(),
+            self.id
+        );
+        let _ = self.child_handle.kill();
     }
 }
 

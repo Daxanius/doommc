@@ -103,7 +103,7 @@ fn init_clients(
             .entity(player)
             .insert(doom_session)
             .insert(MovementTracker::default());
-        inventory.set_slot(40, Some(map));
+        inventory.set_slot(40, map);
         *game_mode = GameMode::Creative;
     }
 }
@@ -120,9 +120,9 @@ pub struct MovementTracker {
     pub strafing_right: bool,
 }
 
-fn freeze_player(mut q: Query<(&mut Position, With<MovementTracker>)>) {
-    for (mut position) in &mut q {
-        position.0 .0 = DVec3::new(0.0, 65.0, 0.0);
+fn freeze_player(mut q: Query<&mut Position, With<MovementTracker>>) {
+    for mut position in &mut q {
+        position.0 = DVec3::new(0.0, 65.0, 0.0);
     }
 }
 
@@ -159,7 +159,7 @@ fn on_player_move(
     const MOVE_ON: f64 = 0.03;
     const MOVE_OFF: f64 = 0.015;
 
-    for e in ev.iter() {
+    for e in ev.read() {
         let Ok((mut session, mut tr)) = q.get_mut(e.client) else {
             continue;
         };
@@ -235,7 +235,7 @@ fn on_player_move(
 }
 
 fn on_player_sneak(mut ev: EventReader<SneakEvent>, mut q: Query<&mut DoomSession>) {
-    for e in &mut ev {
+    for e in &mut ev.read() {
         let Ok(mut session) = q.get_mut(e.client) else {
             continue;
         };
@@ -247,7 +247,7 @@ fn on_player_sneak(mut ev: EventReader<SneakEvent>, mut q: Query<&mut DoomSessio
 }
 
 fn on_player_interact(mut ev: EventReader<HandSwingEvent>, mut q: Query<&mut DoomSession>) {
-    for e in &mut ev {
+    for e in &mut ev.read() {
         let Ok(mut session) = q.get_mut(e.client) else {
             continue;
         };

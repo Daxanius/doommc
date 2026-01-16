@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 doom-protocol = { path = "../doom-protocol" }
-valence = { version = "0.2.0-alpha.1+mc.1.20.1", features = [
+valence = { git = "https://github.com/Daxanius/valence.git", branch = "main", features = [
     "inventory",
     "network",
     "player_list",

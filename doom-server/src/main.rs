@@ -1,16 +1,24 @@
+use std::net::SocketAddr;
+
 use doom_server::{DoomSession, DoomSessionAllocator};
 use valence::{
     inventory::UpdateSelectedSlotEvent,
+    network::{BroadcastToLan, CleanupFn, HandshakeData, ServerListPing},
     prelude::*,
     protocol::{
         packets::play::{map_update_s2c::Data, MapUpdateS2c},
         VarInt, WritePacket,
     },
+    MINECRAFT_VERSION,
 };
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .insert_resource(NetworkSettings {
+            callbacks: CallBacks.into(),
+            ..Default::default()
+        })
         .add_systems(Startup, setup)
         .add_systems(Update, (despawn_disconnected_clients,))
         .add_systems(Update, init_clients)
@@ -127,4 +135,43 @@ fn tick_all_sessions(mut q: Query<(&mut Client, &mut DoomSession)>) {
 
 fn is_doom_map(stack: &ItemStack) -> bool {
     stack.item == ItemKind::FilledMap
+}
+
+struct CallBacks;
+
+#[async_trait::async_trait]
+impl NetworkCallbacks for CallBacks {
+    async fn server_list_ping(
+        &self,
+        _shared: &SharedNetworkState,
+        remote_addr: SocketAddr,
+        handshake_data: &HandshakeData,
+    ) -> ServerListPing {
+        ServerListPing::Respond {
+            online_players: 0,
+            max_players: 10,
+            player_sample: vec![],
+            description: "Get ready to RIP AND TEAR".into_text(),
+            favicon_png: include_bytes!("../assets/logo-64x64.png"),
+            version_name: ("Valence ".color(Color::GOLD) + MINECRAFT_VERSION.color(Color::RED))
+                .to_legacy_lossy(),
+            protocol: handshake_data.protocol_version,
+        }
+    }
+
+    async fn broadcast_to_lan(&self, _shared: &SharedNetworkState) -> BroadcastToLan {
+        BroadcastToLan::Enabled("DOOM!".into())
+    }
+
+    async fn login(
+        &self,
+        _shared: &SharedNetworkState,
+        info: &NewClientInfo,
+    ) -> Result<CleanupFn, Text> {
+        let username = info.username.clone();
+
+        Ok(Box::new(move || {
+            println!("Cleaning up client: {username}");
+        }))
+    }
 }

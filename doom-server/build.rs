@@ -47,10 +47,22 @@ fn main() -> io::Result<()> {
             (url, sha1_hex.clone())
         }
 
-        // Cached
-        (false, Some((url, sha))) => {
+        // Cached with same content
+        (false, Some((url, sha))) if sha == sha1_hex => {
             println!("cargo:warning=Using cached resource pack (SHA unchanged): {url}");
             (url, sha)
+        }
+
+        // Cached but content changed
+        (false, Some((_old_url, old_sha))) => {
+            println!(
+                "cargo:warning=Resource pack changed ({} -> {}), re-uploading...",
+                old_sha, sha1_hex
+            );
+            let url = upload_to_paste_cnet(&zip_bytes).expect("upload failed");
+            fs::write(&cache_path, format!("{url}\n{sha1_hex}\n"))?;
+            println!("cargo:warning=Uploaded resource pack: {url}");
+            (url, sha1_hex.clone())
         }
 
         // No cache at all
@@ -92,20 +104,34 @@ fn upload_to_paste_cnet(bytes: &[u8]) -> Result<String, reqwest::Error> {
 }
 
 fn zip_dir(src_dir: &Path, dst_file: &Path) -> io::Result<()> {
+    use zip::DateTime;
+
     let file = fs::File::create(dst_file)?;
     let mut zip = ZipWriter::new(file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    // Fixed timestamp so builds are reproducible
+    let fixed_time =
+        DateTime::from_date_and_time(1993, 12, 10, 0, 0, 0).expect("Invalid zip datetime");
+
+    let options = FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .last_modified_time(fixed_time);
 
     let src_dir = src_dir.canonicalize()?;
+
+    // Collect and sort for stable ordering
+    let mut files = Vec::new();
     for entry in WalkDir::new(&src_dir).into_iter().filter_map(Result::ok) {
         let path = entry.path();
-        if path.is_dir() {
-            continue;
+        if path.is_file() {
+            let rel = path.strip_prefix(&src_dir).unwrap();
+            let name = rel.to_string_lossy().replace('\\', "/");
+            files.push((name, path.to_path_buf()));
         }
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let rel = path.strip_prefix(&src_dir).unwrap();
-        let name = rel.to_string_lossy().replace('\\', "/");
-
+    for (name, path) in files {
         zip.start_file(name, options)?;
         zip.write_all(&fs::read(path)?)?;
     }

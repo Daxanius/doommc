@@ -48,30 +48,41 @@ impl Serialize for Frame {
 impl Frame {
     #[must_use]
     pub fn from_framebuffer(buffer: &[u8], src_w: usize, src_h: usize) -> Self {
-        // Initialize with a default color index (e.g., 0)
-        let mut new_data = [0u8; MAP_WIDTH * MAP_HEIGHT];
+        let mut out = [0u8; MAP_WIDTH * MAP_HEIGHT];
 
-        // Calculate mapped height to maintain aspect ratio
-        let draw_h = (MAP_WIDTH * src_h) / src_w;
-        let v_offset = (MAP_HEIGHT - draw_h) / 2;
+        let dst_w = MAP_WIDTH as f32;
+        let dst_h = MAP_HEIGHT as f32;
+        let src_wf = src_w as f32;
+        let src_hf = src_h as f32;
 
-        for y in 0..draw_h {
+        // "Cover" scale: fill the entire destination, cropping overflow.
+        let scale = (dst_w / src_wf).max(dst_h / src_hf);
+
+        let scaled_w = src_wf * scale;
+        let scaled_h = src_hf * scale;
+
+        // Center crop in scaled space
+        let crop_x = (scaled_w - dst_w) * 0.5;
+        let crop_y = (scaled_h - dst_h) * 0.5;
+
+        for y in 0..MAP_HEIGHT {
             for x in 0..MAP_WIDTH {
-                // Map current y back to the original height
-                let src_x = (x * src_w) / MAP_WIDTH;
-                let src_y = (y * src_h) / draw_h;
+                // Destination pixel -> scaled source space (+ crop), then -> original source space
+                let sx = ((x as f32 + crop_x) / scale).round() as isize;
+                let sy = ((y as f32 + crop_y) / scale).round() as isize;
 
-                let src_idx = src_y * src_w + src_x;
-                let original_color = buffer[src_idx];
+                // Clamp to be safe
+                let sx = sx.clamp(0, (src_w as isize) - 1) as usize;
+                let sy = sy.clamp(0, (src_h as isize) - 1) as usize;
 
-                // Calculate destination index with the vertical offset
-                let dest_idx = (y + v_offset) * MAP_WIDTH + x;
+                let src_idx = sy * src_w + sx;
+                let original = buffer[src_idx];
 
-                new_data[dest_idx] = PALETTE_MAPPING[original_color as usize];
+                out[y * MAP_WIDTH + x] = PALETTE_MAPPING[original as usize];
             }
         }
 
-        Frame(new_data)
+        Frame(out)
     }
 }
 

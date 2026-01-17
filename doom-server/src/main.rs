@@ -1,11 +1,16 @@
 use std::net::SocketAddr;
 
-use doom_server::plugins::{
-    chat::ChatPlugin,
-    doom::{DoomPlugin, DoomSessionRegistry},
-    queue::{EnqueuePlayer, PlayerAdmitted, QueuePlugin},
+use doom_server::{
+    plugins::{
+        chat::ChatPlugin,
+        command::DoomCommandPlugin,
+        doom::{DoomPlugin, DoomSessionDirectory, DoomSessionRegistry},
+        queue::{EnqueuePlayer, PlayerAdmitted, QueuePlugin},
+    },
+    utils::{SERVER_RESOURCE_PACK_SHA1_HEX, SERVER_RESOURCE_PACK_URL},
 };
 use valence::{
+    command::scopes::CommandScopes,
     message::SendMessage,
     network::{BroadcastToLan, CleanupFn, HandshakeData, ServerListPing},
     prelude::*,
@@ -22,10 +27,12 @@ fn main() {
             DefaultPlugins,
             DoomPlugin,
             ChatPlugin,
+            DoomCommandPlugin,
             QueuePlugin { capacity: 10 },
         ))
         .add_systems(Startup, setup)
         .add_systems(Update, init_clients)
+        .add_systems(Update, despawn_disconnected_clients)
         .add_systems(Update, on_player_admitted_start_session)
         .add_systems(Update, on_player_enqueued_give_spectator_map)
         .run();
@@ -61,15 +68,18 @@ fn setup(
 fn init_clients(
     mut commands: Commands,
     mut d_registry: ResMut<DoomSessionRegistry>,
+    mut d_directory: ResMut<DoomSessionDirectory>,
     mut clients: Query<
         (
             Entity,
             &mut EntityLayerId,
             &mut VisibleChunkLayer,
             &mut VisibleEntityLayers,
+            &mut CommandScopes,
             &mut Position,
             &mut GameMode,
             &mut Inventory,
+            &mut Client,
         ),
         Added<Client>,
     >,
@@ -80,9 +90,11 @@ fn init_clients(
         mut layer_id,
         mut visible_chunk_layer,
         mut visible_entity_layers,
+        mut permissions,
         mut pos,
         mut game_mode,
         mut inventory,
+        mut client,
     ) in &mut clients
     {
         let layer = layers.single();
@@ -91,11 +103,20 @@ fn init_clients(
         visible_entity_layers.0.insert(layer);
         pos.set([0.5, 65.0, 0.5]);
         *game_mode = GameMode::Creative;
+        permissions.add("valence.admin");
 
         let (session, map) = d_registry.create_session();
+        d_directory.insert(entity, session.id());
         commands.entity(entity).insert(session);
 
         inventory.set_slot(40, map);
+
+        client.set_resource_pack(
+            SERVER_RESOURCE_PACK_URL,
+            SERVER_RESOURCE_PACK_SHA1_HEX,
+            false,
+            Some("Optional but provides a more integral experience".into_text()),
+        );
     }
 }
 
@@ -113,7 +134,7 @@ fn on_player_enqueued_give_spectator_map(
             continue;
         };
 
-        if let Some(map) = doom_registry.create_random_view_map() {
+        if let Some(map) = doom_registry.create_random_map_view() {
             inv.set_slot(40, map);
             client.send_action_bar_message("You're in the DOOM queue. Watching an active session…");
         } else {
@@ -162,7 +183,7 @@ impl NetworkCallbacks for CallBacks {
             max_players: 1,
             player_sample: vec![],
             description: "Get ready to RIP AND TEAR".into_text(),
-            favicon_png: include_bytes!("../assets/logo-64x64.png"),
+            favicon_png: include_bytes!("../assets/logo.png"),
             version_name: ("Valence ".color(Color::GOLD) + MINECRAFT_VERSION.color(Color::RED))
                 .to_legacy_lossy(),
             protocol: handshake_data.protocol_version,

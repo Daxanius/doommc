@@ -2,6 +2,15 @@
 name = "doom-server"
 version = "0.1.0"
 edition = "2021"
+default-run = "doom-server"
+
+[[bin]]
+name = "doom-server"
+path = "./src/main.rs"
+
+[[bin]]
+name = "doom-worker"
+path = "../doom-worker/main.rs"
 
 [dependencies]
 doom-protocol = { path = "../doom-protocol" }
@@ -9,8 +18,15 @@ valence = { git = "https://github.com/Daxanius/valence.git", branch = "main", fe
     "inventory",
     "network",
     "player_list",
+    "command",
 ] }
 postcard = { version = "1.0", features = ["alloc"] }
 mpsc = "0.2.6"
 async-trait = "0.1.89"
 rand = "0.9.2"
+
+[build-dependencies]
+walkdir = "2"
+zip = "0.6"
+sha1 = "0.10"
+reqwest = { version = "0.12", features = ["blocking", "rustls-tls"] }

@@ -13,7 +13,7 @@ impl Plugin for ChatPlugin {
         #[rustfmt::skip]
         app
         .insert_resource(ChatHistory::default())
-        .add_systems(Update, (on_chat_message));
+        .add_systems(Update, on_chat_message);
     }
 }
 

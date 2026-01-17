@@ -1,6 +1,6 @@
 use doom_protocol::{Frame, Input, ToChild};
 use rand::seq::IteratorRandom as _;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::net::TcpListener;
 use std::process::Child;
@@ -27,6 +27,7 @@ impl Plugin for DoomPlugin {
         #[rustfmt::skip]
         app
         .insert_resource(DoomSessionRegistry::default())
+        .insert_resource(DoomSessionDirectory::default())
         .add_systems(
             Update,
             (
@@ -242,8 +243,14 @@ impl DoomSessionRegistry {
 
     /// Creates a map spectating a random session
     #[must_use]
-    pub fn create_random_view_map(&mut self) -> Option<ItemStack> {
+    pub fn create_random_map_view(&mut self) -> Option<ItemStack> {
         let id = *self.in_use.iter().choose(&mut rand::rng())?;
+        self.create_map_view(id)
+    }
+
+    /// Creates a map spectating a random session
+    #[must_use]
+    pub fn create_map_view(&mut self, id: i32) -> Option<ItemStack> {
         let mut tag = Compound::new();
         tag.insert("map", id);
         Some(ItemStack::new(ItemKind::FilledMap, 1, Some(tag)))
@@ -283,6 +290,36 @@ impl Default for DoomSessionRegistry {
             free_ids: Vec::new(),
             in_use: HashSet::new(),
         }
+    }
+}
+
+/// Allows for keeping track of player-session-player mappings
+#[derive(Resource, Default)]
+pub struct DoomSessionDirectory {
+    pub owner_by_id: HashMap<i32, Entity>,
+    pub id_by_owner: HashMap<Entity, i32>,
+}
+
+impl DoomSessionDirectory {
+    pub fn insert(&mut self, owner: Entity, id: i32) {
+        self.owner_by_id.insert(id, owner);
+        self.id_by_owner.insert(owner, id);
+    }
+
+    pub fn remove_by_owner(&mut self, owner: Entity) -> Option<i32> {
+        let id = self.id_by_owner.remove(&owner)?;
+        self.owner_by_id.remove(&id);
+        Some(id)
+    }
+
+    #[must_use]
+    pub fn owner_of(&self, id: i32) -> Option<Entity> {
+        self.owner_by_id.get(&id).copied()
+    }
+
+    #[must_use]
+    pub fn id_of(&self, owner: Entity) -> Option<i32> {
+        self.id_by_owner.get(&owner).copied()
     }
 }
 
@@ -536,8 +573,8 @@ fn handle_controller_scroll(
     }
 }
 
-fn update_active_sessions(mut q: Query<(&mut Client, &mut DoomSession)>) {
-    for (mut client, session) in &mut q {
+fn update_active_sessions(mut q: Query<&mut DoomSession>, mut clients: Query<&mut Client>) {
+    for session in &mut q {
         if !session.active {
             continue;
         }
@@ -557,7 +594,9 @@ fn update_active_sessions(mut q: Query<(&mut Client, &mut DoomSession)>) {
                     }),
                 };
 
-                client.write_packet(&pkt);
+                for mut client in &mut clients {
+                    client.write_packet(&pkt);
+                }
             }
         }
     }

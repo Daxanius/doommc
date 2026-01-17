@@ -4,14 +4,6 @@ version = "0.1.0"
 edition = "2021"
 default-run = "doom-server"
 
-[[bin]]
-name = "doom-server"
-path = "./src/main.rs"
-
-[[bin]]
-name = "doom-worker"
-path = "../doom-worker/main.rs"
-
 [dependencies]
 doom-protocol = { path = "../doom-protocol" }
 valence = { git = "https://github.com/Daxanius/valence.git", branch = "main", features = [

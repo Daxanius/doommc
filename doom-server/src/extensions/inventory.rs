@@ -1,5 +1,7 @@
 use valence::{prelude::Inventory, ItemKind, ItemStack};
 
+pub const HOTBAR_SIZE: u16 = 9;
+
 #[derive(Debug)]
 pub enum SwapError {
     NotFound,
@@ -8,22 +10,35 @@ pub enum SwapError {
 pub trait InventoryExt {
     fn clear(&mut self);
     fn fill(&mut self, stack: ItemStack);
+
+    /// Swaps the first item stack matching the predicate with a new item.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SwapError::NotFound` if no item stack matches the predicate.
     fn swap_first<F>(&mut self, find: F, new_item: ItemStack) -> Result<ItemStack, SwapError>
     where
         F: Fn(&ItemStack) -> bool;
+
+    fn find_stacks_of(&self, kind: ItemKind) -> Vec<&ItemStack>;
+
+    fn hotbar_slot(&self, idx: u8) -> &ItemStack;
 }
 
 impl InventoryExt for Inventory {
+    #[inline]
     fn fill(&mut self, stack: ItemStack) {
         for i in 0..self.slot_count() {
             self.set_slot(i, stack.clone());
         }
     }
 
+    #[inline]
     fn clear(&mut self) {
         self.fill(ItemStack::new(ItemKind::Air, 0, None));
     }
 
+    #[inline]
     fn swap_first<F>(&mut self, find: F, new_item: ItemStack) -> Result<ItemStack, SwapError>
     where
         F: Fn(&ItemStack) -> bool,
@@ -38,5 +53,24 @@ impl InventoryExt for Inventory {
         }
 
         Err(SwapError::NotFound)
+    }
+
+    #[inline]
+    fn find_stacks_of(&self, kind: ItemKind) -> Vec<&ItemStack> {
+        let mut stacks = Vec::<&ItemStack>::new();
+
+        for idx in 0..self.slot_count() {
+            let stack = self.slot(idx);
+            if stack.item == kind {
+                stacks.push(stack);
+            }
+        }
+
+        stacks
+    }
+
+    #[inline]
+    fn hotbar_slot(&self, idx: u8) -> &ItemStack {
+        self.slot(u16::from(idx) + (self.slot_count() - HOTBAR_SIZE - 1))
     }
 }

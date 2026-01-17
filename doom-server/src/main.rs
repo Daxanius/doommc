@@ -5,9 +5,10 @@ use doom_server::{
         chat::ChatPlugin,
         command::DoomCommandPlugin,
         doom::{DoomPlugin, DoomSessionDirectory, DoomSessionRegistry},
+        hotbar::HotbarPlugin,
         queue::{EnqueuePlayer, PlayerAdmitted, QueuePlugin},
     },
-    utils::{SERVER_RESOURCE_PACK_SHA1_HEX, SERVER_RESOURCE_PACK_URL},
+    SERVER_RESOURCE_PACK_SHA1_HEX, SERVER_RESOURCE_PACK_URL,
 };
 use valence::{
     command::scopes::CommandScopes,
@@ -27,6 +28,7 @@ fn main() {
             DefaultPlugins,
             DoomPlugin,
             ChatPlugin,
+            HotbarPlugin,
             DoomCommandPlugin,
             QueuePlugin { capacity: 10 },
         ))
@@ -103,7 +105,7 @@ fn init_clients(
         visible_entity_layers.0.insert(layer);
         pos.set([0.5, 65.0, 0.5]);
         *game_mode = GameMode::Creative;
-        permissions.add("valence.admin");
+        permissions.add("doom.admin");
 
         let (session, map) = d_registry.create_session();
         d_directory.insert(entity, session.id());

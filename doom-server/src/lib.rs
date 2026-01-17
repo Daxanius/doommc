@@ -1,2 +1,4 @@
+pub mod extensions;
 pub mod plugins;
-pub mod utils;
+
+include!(concat!(env!("OUT_DIR"), "/resource_pack_consts.rs"));

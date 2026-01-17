@@ -8,7 +8,6 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use valence::interact_item::InteractItemEvent;
-use valence::inventory::UpdateSelectedSlotEvent;
 use valence::math::Vec3Swizzles;
 use valence::movement::MovementEvent;
 use valence::nbt::Compound;
@@ -16,6 +15,11 @@ use valence::prelude::*;
 use valence::protocol::packets::play::map_update_s2c::Data;
 use valence::protocol::packets::play::MapUpdateS2c;
 use valence::protocol::{VarInt, WritePacket};
+
+use crate::extensions::inventory::InventoryExt;
+use crate::extensions::item::ItemStackExt;
+use crate::extensions::nbt::NbtValue;
+use crate::plugins::hotbar::SelectedHotbarSlot;
 
 /// Plugin that adds DOOM sessions to players holding a filled map in their
 /// inventory hotbar. Each session runs in a separate worker process.
@@ -36,7 +40,7 @@ impl Plugin for DoomPlugin {
                 handle_controller_sneak,
                 handle_controller_move,
                 handle_controller_stop,
-                handle_controller_scroll,
+                update_session_active_from_held_item,
                 update_active_sessions,
                 handle_controller_interact,
             ),
@@ -539,29 +543,20 @@ fn handle_controller_interact(
     }
 }
 
-fn handle_controller_scroll(
+fn update_session_active_from_held_item(
     mut commands: Commands,
-    mut ev: EventReader<UpdateSelectedSlotEvent>,
-    mut q: Query<(Entity, &mut DoomSession, &Inventory, &Position)>,
+    mut q: Query<(
+        Entity,
+        &mut DoomSession,
+        &Inventory,
+        &Position,
+        &SelectedHotbarSlot,
+    )>,
 ) {
-    for e in &mut ev.read() {
-        let Ok((player, mut session, inventory, position)) = q.get_mut(e.client) else {
-            continue;
-        };
+    for (player, mut session, inventory, position, selected) in &mut q {
+        let active = should_be_active(session.id, inventory, selected.0);
 
-        let stack = inventory.slot((e.slot + 36).into());
-
-        // Only set the session to active when the item is a map and the id matches
-        let active = stack.item == ItemKind::FilledMap
-            && stack
-                .nbt
-                .as_ref()
-                .and_then(|data| data.get("map"))
-                .and_then(|id| id.as_i32())
-                .is_some_and(|id| session.id == id);
-
-        let state_changed = session.set_active(active);
-        if state_changed {
+        if session.set_active(active) {
             if active {
                 commands
                     .entity(player)
@@ -610,4 +605,10 @@ fn wrap_degrees(mut d: f32) -> f32 {
         d += 360.0;
     }
     d
+}
+
+fn should_be_active(session_id: i32, inventory: &Inventory, selected: u8) -> bool {
+    let stack = inventory.hotbar_slot(selected);
+
+    stack.is_kind(ItemKind::FilledMap) && stack.has_tag_with("map", &NbtValue::from(session_id).0)
 }

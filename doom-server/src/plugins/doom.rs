@@ -1,4 +1,5 @@
 use doom_protocol::{Frame, Input, ToChild};
+use rand::seq::IteratorRandom as _;
 use std::collections::HashSet;
 use std::env;
 use std::net::TcpListener;
@@ -16,24 +17,26 @@ use valence::protocol::packets::play::map_update_s2c::Data;
 use valence::protocol::packets::play::MapUpdateS2c;
 use valence::protocol::{VarInt, WritePacket};
 
+/// Plugin that adds DOOM sessions to players holding a filled map in their
+/// inventory hotbar. Each session runs in a separate worker process.
+/// The map ID is negative and corresponds to the session ID.
 pub struct DoomPlugin;
 
 impl Plugin for DoomPlugin {
     fn build(&self, app: &mut App) {
         #[rustfmt::skip]
         app
-        .insert_resource(DoomMapAllocator::default())
+        .insert_resource(DoomSessionRegistry::default())
         .add_systems(
             Update,
             (
-                init_clients_with_session,
                 cleanup_disconnected_clients,
                 freeze_controllers,
                 handle_controller_sneak,
                 handle_controller_move,
                 handle_controller_stop,
                 handle_controller_scroll,
-                update_all_sessions,
+                update_active_sessions,
                 handle_controller_interact,
             ),
         );
@@ -179,6 +182,13 @@ impl DoomSession {
         let _ = self.input_tx.send(ToChild::State { active });
         true
     }
+
+    /// Binds a map to view this session
+    pub fn bind_map(&self, map: &mut ItemStack) {
+        let mut tag = Compound::new();
+        tag.insert("map", self.id);
+        map.nbt = Some(tag);
+    }
 }
 
 impl Drop for DoomSession {
@@ -193,17 +203,18 @@ impl Drop for DoomSession {
 }
 
 #[derive(Resource)]
-pub struct DoomMapAllocator {
+pub struct DoomSessionRegistry {
     next_id: i32,
     free_ids: Vec<i32>,
     in_use: HashSet<i32>,
 }
 
 /// Uses negative map IDs for DOOM sessions
-impl DoomMapAllocator {
+impl DoomSessionRegistry {
+    /// Creates a doom session bound to a map
     #[must_use]
     pub fn create_session(&mut self) -> (DoomSession, ItemStack) {
-        let id = self.alloc();
+        let id = self.create_id();
 
         let mut tag = Compound::new();
         tag.insert("map", id);
@@ -212,10 +223,36 @@ impl DoomMapAllocator {
         (DoomSession::from_id(id), map)
     }
 
+    /// Creates a doom session and binds it to an existing map
+    #[must_use]
+    pub fn create_session_with_map(&mut self, map: &mut ItemStack) -> DoomSession {
+        let id = self.create_id();
+
+        let mut tag = Compound::new();
+        tag.insert("map", id);
+        map.nbt = Some(tag);
+
+        DoomSession::from_id(id)
+    }
+
+    pub fn destroy_session(&mut self, session: DoomSession) {
+        self.free_id(session.id);
+        drop(session);
+    }
+
+    /// Creates a map spectating a random session
+    #[must_use]
+    pub fn create_random_view_map(&mut self) -> Option<ItemStack> {
+        let id = *self.in_use.iter().choose(&mut rand::rng())?;
+        let mut tag = Compound::new();
+        tag.insert("map", id);
+        Some(ItemStack::new(ItemKind::FilledMap, 1, Some(tag)))
+    }
+
     /// Used to reserve maps that don't need to be attached to a DOOM session
     /// will prevent the ID from accidentally being reused
     #[must_use]
-    pub fn alloc(&mut self) -> i32 {
+    pub fn create_id(&mut self) -> i32 {
         let id = self.free_ids.pop().unwrap_or_else(|| {
             let id = self.next_id;
             self.next_id -= 1;
@@ -227,7 +264,7 @@ impl DoomMapAllocator {
         id
     }
 
-    pub fn free(&mut self, id: i32) {
+    pub fn free_id(&mut self, id: i32) {
         let was_in_use = self.in_use.remove(&id);
         debug_assert!(was_in_use, "free of unknown/not-in-use id: {id}");
 
@@ -239,7 +276,7 @@ impl DoomMapAllocator {
     }
 }
 
-impl Default for DoomMapAllocator {
+impl Default for DoomSessionRegistry {
     fn default() -> Self {
         Self {
             next_id: -1,
@@ -306,20 +343,8 @@ impl DoomController {
     }
 }
 
-fn init_clients_with_session(
-    mut commands: Commands,
-    mut doom_session_allocator: ResMut<DoomMapAllocator>,
-    mut clients: Query<(Entity, &mut Inventory), Added<Client>>,
-) {
-    for (player, mut inventory) in &mut clients {
-        let (doom_session, map) = doom_session_allocator.create_session();
-        commands.entity(player).insert(doom_session);
-        inventory.set_slot(40, map);
-    }
-}
-
 pub fn cleanup_disconnected_clients(
-    mut alloc: ResMut<DoomMapAllocator>,
+    mut registry: ResMut<DoomSessionRegistry>,
     query: Query<&DoomSession>,
     mut disconnected_clients: RemovedComponents<Client>,
 ) {
@@ -328,8 +353,8 @@ pub fn cleanup_disconnected_clients(
             continue;
         };
 
-        println!("Deallocating DOOM session {}", session.id());
-        alloc.free(session.id());
+        println!("Freeing DOOM session {}", session.id());
+        registry.free_id(session.id());
     }
 }
 
@@ -487,9 +512,18 @@ fn handle_controller_scroll(
             continue;
         };
 
-        let active = inventory.slot((e.slot + 36).into()).item == ItemKind::FilledMap;
-        let state_changed = session.set_active(active);
+        let stack = inventory.slot((e.slot + 36).into());
 
+        // Only set the session to active when the item is a map and the id matches
+        let active = stack.item == ItemKind::FilledMap
+            && stack
+                .nbt
+                .as_ref()
+                .and_then(|data| data.get("map"))
+                .and_then(|id| id.as_i32())
+                .is_some_and(|id| session.id == id);
+
+        let state_changed = session.set_active(active);
         if state_changed {
             if active {
                 commands
@@ -502,7 +536,7 @@ fn handle_controller_scroll(
     }
 }
 
-fn update_all_sessions(mut q: Query<(&mut Client, &mut DoomSession)>) {
+fn update_active_sessions(mut q: Query<(&mut Client, &mut DoomSession)>) {
     for (mut client, session) in &mut q {
         if !session.active {
             continue;

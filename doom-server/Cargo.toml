@@ -13,3 +13,4 @@ valence = { git = "https://github.com/Daxanius/valence.git", branch = "main", fe
 postcard = { version = "1.0", features = ["alloc"] }
 mpsc = "0.2.6"
 async-trait = "0.1.89"
+rand = "0.9.2"

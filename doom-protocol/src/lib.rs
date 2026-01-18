@@ -12,6 +12,7 @@ pub const MAP_HEIGHT: usize = 128;
 pub enum GuestCommand {
     Input { input: Input, pressed: bool },
     State { active: bool },
+    RotationDelta(i16),
     RegisterEventPipe { event_tx: IpcSender<HostEvent> },
 }
 
@@ -116,4 +117,12 @@ impl Input {
             Input::StrafeRight => 0xa1,
         }
     }
+}
+
+#[allow(clippy::cast_possible_truncation)]
+#[must_use]
+pub fn float_to_delta(delta: f32) -> i16 {
+    let sensitivity = -128.0;
+    let scaled_delta = (delta * sensitivity) as i32;
+    scaled_delta.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }

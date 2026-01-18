@@ -8,6 +8,7 @@ struct DoomContext {
     command_rx: IpcReceiver<GuestCommand>,
     event_tx: IpcSender<HostEvent>,
     key_queue: VecDeque<KeyData>,
+    delta: i16,
     active: bool,
 }
 
@@ -18,6 +19,7 @@ impl DoomContext {
             event_tx,
             key_queue: VecDeque::new(),
             active: false,
+            delta: 0,
         }
     }
 
@@ -34,6 +36,9 @@ impl DoomContext {
                 GuestCommand::RegisterEventPipe { event_tx: _ } => {
                     eprintln!("Attempt to register event pipe after creation!");
                 }
+                GuestCommand::RotationDelta(rotation) => {
+                    self.delta += rotation;
+                }
             }
         }
     }
@@ -44,6 +49,9 @@ impl DoomContext {
                 Ok(GuestCommand::State { active }) => self.active = active,
                 Ok(GuestCommand::RegisterEventPipe { event_tx: _ }) => {
                     eprintln!("Attempt to register event pipe after creation!");
+                }
+                Ok(GuestCommand::RotationDelta(rotation)) => {
+                    self.delta += rotation;
                 }
                 Ok(GuestCommand::Input {
                     input: _,
@@ -81,6 +89,12 @@ impl DoomGeneric for DoomContext {
 
     fn set_window_title(&mut self, _title: &str) {
         // No-op
+    }
+
+    fn get_mouse_delta(&mut self) -> i16 {
+        let delta = self.delta;
+        self.delta = 0;
+        delta
     }
 }
 

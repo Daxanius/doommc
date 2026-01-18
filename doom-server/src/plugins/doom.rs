@@ -1,4 +1,4 @@
-use doom_protocol::{Frame, GuestCommand, HostEvent, Input};
+use doom_protocol::{float_to_delta, Frame, GuestCommand, HostEvent, Input};
 use ipc_channel::ipc::{self, IpcOneShotServer, IpcReceiver, IpcSender};
 use rand::seq::IteratorRandom as _;
 use std::collections::{HashMap, HashSet};
@@ -180,6 +180,11 @@ impl DoomSession {
         true
     }
 
+    pub fn set_mouse_delta(&mut self, delta: i16) -> bool {
+        let _ = self.input_tx.send(GuestCommand::RotationDelta(delta));
+        true
+    }
+
     /// Binds a map to view this session
     pub fn bind_map(&self, map: &mut ItemStack) {
         let mut tag = Compound::new();
@@ -324,14 +329,6 @@ impl DoomSessionDirectory {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum TurnState {
-    #[default]
-    None,
-    Left,
-    Right,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MoveState {
     #[default]
     None,
@@ -351,7 +348,6 @@ pub enum StrafeState {
 pub struct DoomController {
     pub last_tick: i64,
     pub last_yaw: f32,
-    pub turn_state: TurnState,
     pub move_state: MoveState,
     pub strafe_state: StrafeState,
     pub freeze_position: DVec3,
@@ -362,7 +358,6 @@ impl Default for DoomController {
         Self {
             last_tick: 0,
             last_yaw: 0.0,
-            turn_state: TurnState::None,
             move_state: MoveState::None,
             strafe_state: StrafeState::None,
             freeze_position: DVec3::ZERO,
@@ -419,8 +414,6 @@ fn handle_controller_move(
     server: Res<Server>,
     mut q: Query<(&mut DoomSession, &mut DoomController)>,
 ) {
-    const TURN_ON: f32 = 3.0;
-    const TURN_OFF: f32 = 1.5;
     const MOVE_ON: f64 = 0.03;
     const MOVE_OFF: f64 = 0.015;
 
@@ -432,27 +425,9 @@ fn handle_controller_move(
         // turn from yaw delta
         let dyaw = wrap_degrees(e.look.yaw - tr.last_yaw);
 
-        let turn_right = if tr.turn_state == TurnState::Right {
-            dyaw > TURN_OFF
-        } else {
-            dyaw > TURN_ON
-        };
-        let turn_left = if tr.turn_state == TurnState::Left {
-            dyaw < -TURN_OFF
-        } else {
-            dyaw < -TURN_ON
-        };
-
-        tr.turn_state = if turn_right {
-            TurnState::Right
-        } else if turn_left {
-            TurnState::Left
-        } else {
-            TurnState::None
-        };
-
-        session.set_input(Input::Right, turn_right);
-        session.set_input(Input::Left, turn_left);
+        if (tr.last_yaw - dyaw).abs() > f32::EPSILON {
+            session.set_mouse_delta(float_to_delta(dyaw));
+        }
 
         tr.last_yaw = e.look.yaw;
 

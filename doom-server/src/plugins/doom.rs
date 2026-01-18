@@ -87,6 +87,7 @@ impl DoomSession {
 
         let child = Command::new(&worker_path) // Use the full validated path
             .arg(format!("127.0.0.1:{port}"))
+            .args(["-warp", "1", "1"])
             .arg("-iwad")
             .arg(wad)
             .stderr(Stdio::inherit())

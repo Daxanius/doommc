@@ -1,12 +1,10 @@
-use doom_protocol::{Frame, Input, ToChild};
+use doom_protocol::{Frame, GuestCommand, HostEvent, Input};
+use ipc_channel::ipc::{self, IpcOneShotServer, IpcReceiver, IpcSender};
 use rand::seq::IteratorRandom as _;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::net::TcpListener;
-use std::path::PathBuf;
 use std::process::Child;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use valence::interact_item::InteractItemEvent;
 use valence::math::Vec3Swizzles;
@@ -60,7 +58,7 @@ pub struct DoomSession {
     pub latest_frame: Arc<Mutex<Option<Frame>>>,
 
     /// Channel to send inputs to the worker
-    pub input_tx: Sender<ToChild>,
+    pub input_tx: IpcSender<GuestCommand>,
 
     /// Doom worker process handle
     pub child_handle: Child,
@@ -73,8 +71,8 @@ pub struct DoomSession {
 impl DoomSession {
     #[must_use]
     fn from_id(id: i32, wad: &str) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
+        // Create a one-shot server to receive the child's communication channel
+        let (server, server_name) = IpcOneShotServer::<IpcSender<GuestCommand>>::new().unwrap();
 
         let exe_path = env::current_exe().expect("Failed to get current exe path");
         let bin_dir = exe_path.parent().expect("Failed to get bin directory");
@@ -86,7 +84,7 @@ impl DoomSession {
         worker_path.push("doom-worker");
 
         let child = Command::new(&worker_path) // Use the full validated path
-            .arg(format!("127.0.0.1:{port}"))
+            .arg(&server_name)
             .args(["-warp", "1", "1"])
             .arg("-iwad")
             .arg(wad)
@@ -100,9 +98,20 @@ impl DoomSession {
             id
         );
 
-        let (stream, _) = listener.accept().expect("Worker failed to connect");
+        // Wait for the child to connect and send us our command sender
+        // This also provides the receiver for HostEvents (Frames)
+        let (_, command_tx) = server.accept().unwrap();
 
-        Self::spawn(id, child, stream)
+        // To get frames BACK from the child, we create a channel here
+        let (event_tx, event_rx) = ipc::channel::<HostEvent>().unwrap();
+
+        // Send this event_tx to the child so it knows where to send frames
+        // (Assuming you've updated your worker's logic to receive this)
+        command_tx
+            .send(GuestCommand::RegisterEventPipe { event_tx })
+            .ok();
+
+        Self::spawn(id, child, command_tx, event_rx)
     }
 
     #[must_use]
@@ -110,46 +119,24 @@ impl DoomSession {
         self.id
     }
 
-    fn spawn(id: i32, child: Child, stream: std::net::TcpStream) -> Self {
-        let (input_tx, input_rx) = std::sync::mpsc::channel::<ToChild>();
+    fn spawn(
+        id: i32,
+        child: Child,
+        input_tx: IpcSender<GuestCommand>,
+        event_rx: IpcReceiver<HostEvent>,
+    ) -> Self {
         let latest_frame = Arc::new(Mutex::new(None));
-
         let frame_store = Arc::clone(&latest_frame);
 
-        // Clone the stream: one for the reader thread, one for the writer thread
-        let mut reader_stream = stream.try_clone().expect("Failed to clone stream");
-        let mut writer_stream = stream;
-
-        // READER THREAD (TCP -> Latest Frame)
+        // ONLY ONE THREAD NEEDED: Reading frames from IPC
         std::thread::spawn(move || {
-            use std::io::Read;
-            loop {
-                let mut len_buf = [0u8; 4];
-                if reader_stream.read_exact(&mut len_buf).is_ok() {
-                    let len = u32::from_le_bytes(len_buf) as usize;
-                    let mut data = vec![0u8; len];
-                    if reader_stream.read_exact(&mut data).is_ok() {
-                        if let Ok(doom_protocol::ToParent::Frame(frame)) =
-                            postcard::from_bytes(&data)
-                        {
-                            let mut lock = frame_store.lock().unwrap();
-                            *lock = Some(frame);
-                        }
+            // IpcReceiver::recv is blocking, perfect for a dedicated thread
+            while let Ok(event) = event_rx.recv() {
+                match event {
+                    HostEvent::Frame(frame) => {
+                        let mut lock = frame_store.lock().unwrap();
+                        *lock = Some(frame);
                     }
-                } else {
-                    break;
-                }
-            }
-        });
-
-        // WRITER THREAD (Channel -> TCP)
-        std::thread::spawn(move || {
-            use std::io::Write;
-            while let Ok(msg) = input_rx.recv() {
-                if let Ok(encoded) = postcard::to_allocvec(&msg) {
-                    let _ = writer_stream.write_all(&(encoded.len() as u32).to_le_bytes());
-                    let _ = writer_stream.write_all(&encoded);
-                    let _ = writer_stream.flush();
                 }
             }
         });
@@ -169,7 +156,7 @@ impl DoomSession {
             return;
         }
 
-        let _ = self.input_tx.send(ToChild::Input { input, pressed });
+        let _ = self.input_tx.send(GuestCommand::Input { input, pressed });
         if pressed {
             self.pressed_keys.push(input);
         } else {
@@ -189,7 +176,7 @@ impl DoomSession {
         }
 
         self.active = active;
-        let _ = self.input_tx.send(ToChild::State { active });
+        let _ = self.input_tx.send(GuestCommand::State { active });
         true
     }
 

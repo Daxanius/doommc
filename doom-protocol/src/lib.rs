@@ -1,3 +1,4 @@
+use ipc_channel::ipc::IpcSender;
 use serde::{Deserialize, Serialize};
 
 use crate::palette::PALETTE_MAPPING;
@@ -8,13 +9,14 @@ pub const MAP_WIDTH: usize = 128;
 pub const MAP_HEIGHT: usize = 128;
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum ToChild {
+pub enum GuestCommand {
     Input { input: Input, pressed: bool },
     State { active: bool },
+    RegisterEventPipe { event_tx: IpcSender<HostEvent> },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum ToParent {
+pub enum HostEvent {
     Frame(Frame),
 }
 

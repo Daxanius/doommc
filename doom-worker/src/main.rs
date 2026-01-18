@@ -1,66 +1,51 @@
-use doom_protocol::{Frame, ToChild, ToParent};
+use doom_protocol::{Frame, GuestCommand, HostEvent};
 use doomgeneric::game::DoomGeneric;
 use doomgeneric::input::KeyData;
+use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
 use std::collections::VecDeque;
-use std::io::{self, Read, Write};
-use std::net::TcpStream;
-use std::sync::mpsc::{self, Receiver};
-use std::thread;
 
 struct DoomContext {
-    input_rx: Receiver<ToChild>,
-    stream: TcpStream,
+    command_rx: IpcReceiver<GuestCommand>,
+    event_tx: IpcSender<HostEvent>,
     key_queue: VecDeque<KeyData>,
     active: bool,
 }
 
 impl DoomContext {
-    pub fn new(stream: TcpStream) -> Self {
-        let mut reader = stream.try_clone().expect("Clone failed");
-        let (tx, rx) = mpsc::channel();
-
-        thread::spawn(move || {
-            loop {
-                let mut len_buf = [0u8; 4];
-                if reader.read_exact(&mut len_buf).is_ok() {
-                    let len = u32::from_le_bytes(len_buf) as usize;
-                    let mut data = vec![0u8; len];
-                    if reader.read_exact(&mut data).is_ok()
-                        && let Ok(msg) = postcard::from_bytes(&data)
-                    {
-                        let _ = tx.send(msg);
-                    }
-                }
-            }
-        });
-
+    pub fn new(command_rx: IpcReceiver<GuestCommand>, event_tx: IpcSender<HostEvent>) -> Self {
         Self {
-            input_rx: rx,
-            stream,
+            command_rx,
+            event_tx,
             key_queue: VecDeque::new(),
             active: false,
         }
     }
 
     fn pump_messages(&mut self) {
-        while let Ok(msg) = self.input_rx.try_recv() {
+        while let Ok(msg) = self.command_rx.try_recv() {
             match msg {
-                ToChild::Input { input, pressed } => {
+                GuestCommand::Input { input, pressed } => {
                     self.key_queue.push_back(KeyData {
                         pressed,
                         key: input.to_keycode(),
                     });
                 }
-                ToChild::State { active } => self.active = active,
+                GuestCommand::State { active } => self.active = active,
+                GuestCommand::RegisterEventPipe { event_tx: _ } => {
+                    eprintln!("Attempt to register event pipe after creation!");
+                }
             }
         }
     }
 
     fn wait_until_resumed(&mut self) {
         while !self.active {
-            match self.input_rx.recv() {
-                Ok(ToChild::State { active }) => self.active = active,
-                Ok(ToChild::Input {
+            match self.command_rx.recv() {
+                Ok(GuestCommand::State { active }) => self.active = active,
+                Ok(GuestCommand::RegisterEventPipe { event_tx: _ }) => {
+                    eprintln!("Attempt to register event pipe after creation!");
+                }
+                Ok(GuestCommand::Input {
                     input: _,
                     pressed: _,
                 })
@@ -70,20 +55,10 @@ impl DoomContext {
     }
 
     fn send_frame(&mut self, frame: &Frame) {
-        let msg = ToParent::Frame(*frame);
+        let msg = HostEvent::Frame(*frame);
 
-        if let Ok(encoded) = postcard::to_allocvec(&msg) {
-            let res = (|| -> io::Result<()> {
-                self.stream
-                    .write_all(&(encoded.len() as u32).to_le_bytes())?;
-                self.stream.write_all(&encoded)?;
-                self.stream.flush()?;
-                Ok(())
-            })();
-
-            if let Err(e) = res {
-                eprintln!("Failed to send frame over TCP: {e}");
-            }
+        if let Err(e) = self.event_tx.send(msg) {
+            eprintln!("Failed to send frame over IPC: {e}");
         }
     }
 }
@@ -111,11 +86,25 @@ impl DoomGeneric for DoomContext {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let addr = args.get(1).expect("No port provided");
+    let server_name = args.get(1).expect("Missing IPC server name");
 
-    let stream = TcpStream::connect(addr).expect("Failed to connect to parent");
+    // Create a channel for the parent to send messages TO the child
+    let initial_tx: IpcSender<IpcSender<GuestCommand>> =
+        IpcSender::connect(server_name.clone()).expect("Could not create IPC connection");
+    let (command_tx, command_rx) =
+        ipc::channel::<GuestCommand>().expect("Could not create channel");
+    initial_tx.send(command_tx).unwrap();
 
-    let context = DoomContext::new(stream);
+    // BLOCK until the parent sends the Event Pipe (HostEvent sender)
+    // This ensures event_tx is ready before DoomContext even exists
+    let GuestCommand::RegisterEventPipe { event_tx } = command_rx
+        .recv()
+        .expect("Failed to receive initial handshake")
+    else {
+        panic!("Expected RegisterEventPipe as the first message from parent!");
+    };
+
+    let context = DoomContext::new(command_rx, event_tx);
     doomgeneric::game::init(context, &args);
     loop {
         doomgeneric::game::tick();

@@ -3,6 +3,7 @@ use rand::seq::IteratorRandom as _;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::net::TcpListener;
+use std::path::PathBuf;
 use std::process::Child;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
@@ -64,13 +65,14 @@ pub struct DoomSession {
     /// Doom worker process handle
     pub child_handle: Child,
 
+    // pub iwad: PathBuf,
     /// Currently pressed keys
     pressed_keys: Vec<doom_protocol::Input>,
 }
 
 impl DoomSession {
     #[must_use]
-    fn from_id(id: i32) -> Self {
+    fn from_id(id: i32, wad: &str) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
 
@@ -85,6 +87,8 @@ impl DoomSession {
 
         let child = Command::new(&worker_path) // Use the full validated path
             .arg(format!("127.0.0.1:{port}"))
+            .arg("-iwad")
+            .arg(wad)
             .stderr(Stdio::inherit())
             .spawn()
             .unwrap_or_else(|e| panic!("Failed to start worker at {worker_path:?}: {e}"));
@@ -218,26 +222,30 @@ pub struct DoomSessionRegistry {
 impl DoomSessionRegistry {
     /// Creates a doom session bound to a map
     #[must_use]
-    pub fn create_session(&mut self) -> (DoomSession, ItemStack) {
+    pub fn create_session(&mut self, wad: &str) -> (DoomSession, ItemStack) {
         let id = self.create_id();
 
         let mut tag = Compound::new();
         tag.insert("map", id);
         let map = ItemStack::new(ItemKind::FilledMap, 1, Some(tag));
 
-        (DoomSession::from_id(id), map)
+        (DoomSession::from_id(id, wad), map)
     }
 
     /// Creates a doom session and binds it to an existing map
     #[must_use]
-    pub fn create_session_with_map(&mut self, map: &mut ItemStack) -> DoomSession {
+    pub fn create_session_with_map(&mut self, map: &mut ItemStack, wad: &str) -> DoomSession {
         let id = self.create_id();
 
         let mut tag = Compound::new();
         tag.insert("map", id);
         map.nbt = Some(tag);
 
-        DoomSession::from_id(id)
+        DoomSession::from_id(id, wad)
+    }
+
+    pub fn replace_session(&mut self, id: i32, wad: &str) -> DoomSession {
+        DoomSession::from_id(id, wad)
     }
 
     pub fn destroy_session(&mut self, session: DoomSession) {

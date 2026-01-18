@@ -107,7 +107,7 @@ fn init_clients(
         *game_mode = GameMode::Creative;
         permissions.add("doom.admin");
 
-        let (session, map) = d_registry.create_session();
+        let (session, map) = d_registry.create_session("doom.wad");
         d_directory.insert(entity, session.id());
         commands.entity(entity).insert(session);
 
@@ -162,7 +162,7 @@ fn on_player_admitted_start_session(
             continue;
         };
 
-        let (session, map) = doom_registry.create_session();
+        let (session, map) = doom_registry.create_session("doom.wad");
         commands.entity(*player).insert(session);
         inv.set_slot(40, map);
 

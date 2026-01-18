@@ -56,8 +56,7 @@ fn main() -> io::Result<()> {
         // Cached but content changed
         (false, Some((_old_url, old_sha))) => {
             println!(
-                "cargo:warning=Resource pack changed ({} -> {}), re-uploading...",
-                old_sha, sha1_hex
+                "cargo:warning=Resource pack changed ({old_sha} -> {sha1_hex}), re-uploading..."
             );
             let url = upload_to_paste_cnet(&zip_bytes).expect("upload failed");
             fs::write(&cache_path, format!("{url}\n{sha1_hex}\n"))?;

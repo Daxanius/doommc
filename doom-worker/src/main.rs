@@ -116,7 +116,7 @@ fn main() {
     let stream = TcpStream::connect(addr).expect("Failed to connect to parent");
 
     let context = DoomContext::new(stream);
-    doomgeneric::game::init(context);
+    doomgeneric::game::init(context, &args);
     loop {
         doomgeneric::game::tick();
     }

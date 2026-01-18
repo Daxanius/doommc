@@ -1,5 +1,7 @@
 use valence::{prelude::Inventory, ItemKind, ItemStack};
 
+use crate::extensions::item::ItemStackExt;
+
 pub const HOTBAR_SIZE: u16 = 9;
 
 #[derive(Debug)]
@@ -19,6 +21,8 @@ pub trait InventoryExt {
     fn swap_first<F>(&mut self, find: F, new_item: ItemStack) -> Result<ItemStack, SwapError>
     where
         F: Fn(&ItemStack) -> bool;
+
+    fn replace_first(&mut self, new_item: ItemStack) -> bool;
 
     fn find_stacks_of(&self, kind: ItemKind) -> Vec<&ItemStack>;
 
@@ -53,6 +57,12 @@ impl InventoryExt for Inventory {
         }
 
         Err(SwapError::NotFound)
+    }
+
+    #[inline]
+    fn replace_first(&mut self, new_item: ItemStack) -> bool {
+        self.swap_first(|stack| stack.is_kind(new_item.item), new_item.clone())
+            .is_ok()
     }
 
     #[inline]

@@ -6,6 +6,8 @@ pub trait ItemStackExt {
     fn has_tag_with(&self, tag: &str, val: &Value) -> bool;
 
     fn is_kind(&self, kind: ItemKind) -> bool;
+
+    fn compare(&self, other: ItemStack) -> bool;
 }
 
 impl ItemStackExt for ItemStack {
@@ -20,5 +22,10 @@ impl ItemStackExt for ItemStack {
     #[inline]
     fn is_kind(&self, kind: ItemKind) -> bool {
         self.item == kind
+    }
+
+    #[inline]
+    fn compare(&self, other: ItemStack) -> bool {
+        self.item == other.item && self.nbt == other.nbt
     }
 }

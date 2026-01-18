@@ -10,6 +10,7 @@ use valence::{
     prelude::*,
 };
 
+use crate::plugins::doom::DoomSession;
 use crate::{
     plugins::doom::{DoomSessionDirectory, DoomSessionRegistry},
     extensions::inventory::InventoryExt,
@@ -46,11 +47,13 @@ impl Plugin for DoomCommandPlugin {
         app
         .add_command::<WatchCommand>()
         .add_command::<UnwatchCommand>()
+        .add_command::<DoomSessionCommand>()
         .add_systems(Startup, setup_commands)
         .add_systems(Update, 
             (
                 handle_watch_commands,
-                handle_unwatch_commands
+                handle_unwatch_commands,
+                handle_session_commands
             )
         );
     }
@@ -68,6 +71,16 @@ struct WatchCommand {
 #[paths("unwatch")]
 #[scopes("doom.command.unwatch")]
 struct UnwatchCommand;
+
+#[derive(Command, Debug, Clone)]
+#[paths("session")]
+#[scopes("doom.command.session")]
+enum DoomSessionCommand {
+    #[paths = "recreate"]
+    Recreate(),
+    #[paths = "load {wad}"]
+    Load{ wad: String }
+}
 
 fn handle_watch_commands(
     d_dir: Res<DoomSessionDirectory>,
@@ -124,6 +137,25 @@ fn handle_unwatch_commands(
         // Bind map
         if let Some(map) = d_reg.create_map_view(session_id) {
             let _ = inventory.swap_first(|stack| stack.item == ItemKind::FilledMap, map);
+        }
+    }
+}
+
+fn handle_session_commands(
+    mut commands: Commands,
+    mut d_registry: ResMut<DoomSessionRegistry>,
+    mut events: EventReader<CommandResultEvent<DoomSessionCommand>>,
+    clients: Query<(Entity, &DoomSession)>,
+) {
+    for event in events.read() {
+        let Ok((entity, session)) = clients.get(event.executor) else {
+            continue;
+        };
+
+        if let DoomSessionCommand::Load { wad } = &event.result {
+            let new_session = d_registry.replace_session(session.id(), wad);
+            commands.entity(entity).remove::<DoomSession>();
+            commands.entity(entity).insert(new_session);
         }
     }
 }

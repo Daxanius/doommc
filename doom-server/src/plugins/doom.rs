@@ -577,7 +577,10 @@ fn update_session_active_from_held_item(
     }
 }
 
-fn update_active_sessions(mut q: Query<&mut DoomSession>, mut clients: Query<&mut Client>) {
+fn update_active_sessions(
+    mut q: Query<&mut DoomSession>,
+    mut clients: Query<(&mut Client, &Inventory, &SelectedHotbarSlot)>,
+) {
     for session in &mut q {
         if !session.active {
             continue;
@@ -598,8 +601,10 @@ fn update_active_sessions(mut q: Query<&mut DoomSession>, mut clients: Query<&mu
                     }),
                 };
 
-                for mut client in &mut clients {
-                    client.write_packet(&pkt);
+                for (mut client, inventory, selected_slot) in &mut clients {
+                    if should_be_active(session.id(), inventory, selected_slot.0) {
+                        client.write_packet(&pkt);
+                    }
                 }
             }
         }
@@ -618,6 +623,5 @@ fn wrap_degrees(mut d: f32) -> f32 {
 
 fn should_be_active(session_id: i32, inventory: &Inventory, selected: u8) -> bool {
     let stack = inventory.hotbar_slot(selected);
-
     stack.is_kind(ItemKind::FilledMap) && stack.has_tag_with("map", &NbtValue::from(session_id).0)
 }

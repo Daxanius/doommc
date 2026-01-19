@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, num::NonZero};
 
 use doom_server::{
     plugins::{
@@ -15,13 +15,17 @@ use valence::{
     message::SendMessage,
     network::{BroadcastToLan, CleanupFn, HandshakeData, ServerListPing},
     prelude::*,
-    MINECRAFT_VERSION,
+    ServerSettings, MINECRAFT_VERSION,
 };
 
 fn main() {
     App::new()
         .insert_resource(NetworkSettings {
             callbacks: CallBacks.into(),
+            ..Default::default()
+        })
+        .insert_resource(ServerSettings {
+            tick_rate: NonZero::new(35).unwrap(), // DOOM runs at 35 FPS
             ..Default::default()
         })
         .add_plugins((
@@ -49,15 +53,15 @@ fn setup(
     let mut layer = LayerBundle::new(ident!("overworld"), &dimensions, &biomes, &server);
 
     // We have to add chunks to the world first, they start empty.
-    for z in -5..5 {
-        for x in -5..5 {
+    for z in -16..16 {
+        for x in -16..16 {
             layer.chunk.insert_chunk([x, z], UnloadedChunk::new());
         }
     }
 
     // This actually sets the block in the world.
-    for z in -10..10 {
-        for x in -10..10 {
+    for z in -1000..1000 {
+        for x in -1000..1000 {
             layer.chunk.set_block([x, 64, z], BlockState::RED_CONCRETE);
         }
     }

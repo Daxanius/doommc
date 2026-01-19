@@ -351,6 +351,8 @@ pub struct DoomController {
     pub move_state: MoveState,
     pub strafe_state: StrafeState,
     pub freeze_position: DVec3,
+
+    pub correction: DVec3, // previous reference
 }
 
 impl Default for DoomController {
@@ -361,6 +363,7 @@ impl Default for DoomController {
             move_state: MoveState::None,
             strafe_state: StrafeState::None,
             freeze_position: DVec3::ZERO,
+            correction: DVec3::ZERO,
         }
     }
 }
@@ -390,9 +393,22 @@ pub fn cleanup_disconnected_clients(
     }
 }
 
-fn freeze_controllers(mut q: Query<(&mut Position, &DoomController)>) {
-    for (mut position, controller) in &mut q {
-        position.0 = controller.freeze_position;
+fn freeze_controllers(mut q: Query<(&mut Position, &mut DoomController)>) {
+    const DEADZONE: f64 = 0.35;
+    const PULL: f64 = 0.35;
+
+    for (mut position, mut controller) in &mut q {
+        let cur = position.0;
+        let target = controller.freeze_position;
+
+        let delta = cur - target;
+        let dist = delta.length();
+
+        if dist > DEADZONE {
+            let new_pos = controller.freeze_position;
+            controller.correction = new_pos - position.0;
+            position.0 = new_pos;
+        }
     }
 }
 
@@ -418,41 +434,39 @@ fn handle_controller_move(
     const MOVE_OFF: f64 = 0.015;
 
     for e in ev.read() {
-        let Ok((mut session, mut tr)) = q.get_mut(e.client) else {
+        let Ok((mut session, mut controller)) = q.get_mut(e.client) else {
             continue;
         };
 
-        // turn from yaw delta
-        let dyaw = wrap_degrees(e.look.yaw - tr.last_yaw);
+        let delta = (e.position - e.old_position) - controller.correction;
+        controller.correction = DVec3::ZERO;
 
-        if (tr.last_yaw - dyaw).abs() > f32::EPSILON {
-            session.set_mouse_delta(float_to_delta(dyaw));
-        }
-
-        tr.last_yaw = e.look.yaw;
-
-        // movement intent from delta
-        let delta = e.position - e.old_position;
-
-        let yaw = e.look.yaw.to_radians();
+        let yaw = controller.last_yaw.to_radians();
         let forward = Vec2::new(-yaw.sin(), yaw.cos()).normalize();
         let right = -Vec2::new(yaw.cos(), yaw.sin()).normalize();
 
         let f = delta.xz().dot(forward.as_dvec2());
         let r = delta.xz().dot(right.as_dvec2());
 
-        let forward_on = if tr.move_state == MoveState::Forward {
+        // turn from yaw delta
+        let dyaw = wrap_degrees(e.look.yaw - controller.last_yaw);
+        if (controller.last_yaw - dyaw).abs() > f32::EPSILON {
+            session.set_mouse_delta(float_to_delta(dyaw));
+        }
+        controller.last_yaw = e.look.yaw;
+
+        let forward_on = if controller.move_state == MoveState::Forward {
             f > MOVE_OFF
         } else {
             f > MOVE_ON
         };
-        let back_on = if tr.move_state == MoveState::Back {
+        let back_on = if controller.move_state == MoveState::Back {
             f < -MOVE_OFF
         } else {
             f < -MOVE_ON
         };
 
-        tr.move_state = if forward_on {
+        controller.move_state = if forward_on {
             MoveState::Forward
         } else if back_on {
             MoveState::Back
@@ -463,18 +477,18 @@ fn handle_controller_move(
         session.set_input(Input::Up, forward_on);
         session.set_input(Input::Down, back_on);
 
-        let strafe_r = if tr.strafe_state == StrafeState::Right {
+        let strafe_r = if controller.strafe_state == StrafeState::Right {
             r > MOVE_OFF
         } else {
             r > MOVE_ON
         };
-        let strafe_l = if tr.strafe_state == StrafeState::Left {
+        let strafe_l = if controller.strafe_state == StrafeState::Left {
             r < -MOVE_OFF
         } else {
             r < -MOVE_ON
         };
 
-        tr.strafe_state = if strafe_r {
+        controller.strafe_state = if strafe_r {
             StrafeState::Right
         } else if strafe_l {
             StrafeState::Left
@@ -485,7 +499,7 @@ fn handle_controller_move(
         session.set_input(Input::StrafeRight, strafe_r);
         session.set_input(Input::StrafeLeft, strafe_l);
 
-        tr.last_tick = server.current_tick();
+        controller.last_tick = server.current_tick();
     }
 }
 
@@ -529,9 +543,10 @@ fn update_session_active_from_held_item(
 
         if session.set_active(active) {
             if active {
-                commands
-                    .entity(player)
-                    .insert(DoomController::new(position.0));
+                commands.entity(player).insert(DoomController {
+                    freeze_position: position.0,
+                    ..Default::default()
+                });
             } else {
                 commands.entity(player).remove::<DoomController>();
             }

@@ -395,7 +395,6 @@ pub fn cleanup_disconnected_clients(
 
 fn freeze_controllers(mut q: Query<(&mut Position, &mut DoomController)>) {
     const DEADZONE: f64 = 0.35;
-    const PULL: f64 = 0.35;
 
     for (mut position, mut controller) in &mut q {
         let cur = position.0;

@@ -19,6 +19,7 @@ use crate::extensions::inventory::InventoryExt;
 use crate::extensions::item::ItemStackExt;
 use crate::extensions::nbt::NbtValue;
 use crate::plugins::hotbar::SelectedHotbarSlot;
+use crate::TICK_RATE;
 
 /// Plugin that adds DOOM sessions to players holding a filled map in their
 /// inventory hotbar. Each session runs in a separate worker process.
@@ -351,7 +352,6 @@ pub struct DoomController {
     pub move_state: MoveState,
     pub strafe_state: StrafeState,
     pub freeze_position: DVec3,
-
     pub correction: DVec3, // previous reference
 }
 
@@ -447,12 +447,16 @@ fn handle_controller_move(
         let f = delta.xz().dot(forward.as_dvec2());
         let r = delta.xz().dot(right.as_dvec2());
 
+        let current_tick = server.current_tick();
+
         // turn from yaw delta
         let dyaw = wrap_degrees(e.look.yaw - controller.last_yaw);
         if (controller.last_yaw - dyaw).abs() > f32::EPSILON {
             session.set_mouse_delta(float_to_delta(dyaw));
         }
+
         controller.last_yaw = e.look.yaw;
+        controller.last_tick = current_tick;
 
         let forward_on = if controller.move_state == MoveState::Forward {
             f > MOVE_OFF
@@ -497,8 +501,6 @@ fn handle_controller_move(
 
         session.set_input(Input::StrafeRight, strafe_r);
         session.set_input(Input::StrafeLeft, strafe_l);
-
-        controller.last_tick = server.current_tick();
     }
 }
 
@@ -534,16 +536,18 @@ fn update_session_active_from_held_item(
         &mut DoomSession,
         &Inventory,
         &Position,
+        &Look,
         &SelectedHotbarSlot,
     )>,
 ) {
-    for (player, mut session, inventory, position, selected) in &mut q {
+    for (player, mut session, inventory, position, look, selected) in &mut q {
         let active = should_be_active(session.id, inventory, selected.0);
 
         if session.set_active(active) {
             if active {
                 commands.entity(player).insert(DoomController {
                     freeze_position: position.0,
+                    last_yaw: look.yaw,
                     ..Default::default()
                 });
             } else {

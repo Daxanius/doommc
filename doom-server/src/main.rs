@@ -8,7 +8,7 @@ use doom_server::{
         hotbar::HotbarPlugin,
         queue::{EnqueuePlayer, PlayerAdmitted, QueuePlugin},
     },
-    SERVER_RESOURCE_PACK_SHA1_HEX, SERVER_RESOURCE_PACK_URL,
+    SERVER_RESOURCE_PACK_SHA1_HEX, SERVER_RESOURCE_PACK_URL, TICK_RATE,
 };
 use valence::{
     command::scopes::CommandScopes,
@@ -25,7 +25,7 @@ fn main() {
             ..Default::default()
         })
         .insert_resource(ServerSettings {
-            tick_rate: NonZero::new(35).unwrap(), // DOOM runs at 35 FPS
+            tick_rate: NonZero::new(TICK_RATE).unwrap(), // DOOM runs at 35 FPS
             ..Default::default()
         })
         .add_plugins((

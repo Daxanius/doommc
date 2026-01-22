@@ -1,4 +1,6 @@
-use doom_protocol::{float_to_delta, Frame, GuestCommand, HostEvent, Input};
+use doom_protocol::packet::{Frame, Input, TicCmd};
+use doom_protocol::util::float_to_delta;
+use doom_protocol::{ClientEvent, ServerCommand};
 use ipc_channel::ipc::{self, IpcOneShotServer, IpcReceiver, IpcSender};
 use rand::seq::IteratorRandom as _;
 use std::collections::{HashMap, HashSet};
@@ -19,7 +21,6 @@ use crate::extensions::inventory::InventoryExt;
 use crate::extensions::item::ItemStackExt;
 use crate::extensions::nbt::NbtValue;
 use crate::plugins::hotbar::SelectedHotbarSlot;
-use crate::TICK_RATE;
 
 /// Plugin that adds DOOM sessions to players holding a filled map in their
 /// inventory hotbar. Each session runs in a separate worker process.
@@ -42,6 +43,7 @@ impl Plugin for DoomPlugin {
                 handle_controller_stop,
                 update_session_active_from_held_item,
                 update_active_sessions,
+                send_client_ticks,
                 handle_controller_interact,
             ),
         );
@@ -59,21 +61,21 @@ pub struct DoomSession {
     pub latest_frame: Arc<Mutex<Option<Frame>>>,
 
     /// Channel to send inputs to the worker
-    pub input_tx: IpcSender<GuestCommand>,
+    pub input_tx: IpcSender<ServerCommand>,
 
     /// Doom worker process handle
     pub child_handle: Child,
 
     // pub iwad: PathBuf,
     /// Currently pressed keys
-    pressed_keys: Vec<doom_protocol::Input>,
+    pressed_keys: Vec<Input>,
 }
 
 impl DoomSession {
     #[must_use]
     fn from_id(id: i32, wad: &str) -> Self {
         // Create a one-shot server to receive the child's communication channel
-        let (server, server_name) = IpcOneShotServer::<IpcSender<GuestCommand>>::new().unwrap();
+        let (server, server_name) = IpcOneShotServer::<IpcSender<ServerCommand>>::new().unwrap();
 
         let exe_path = env::current_exe().expect("Failed to get current exe path");
         let bin_dir = exe_path.parent().expect("Failed to get bin directory");
@@ -86,7 +88,7 @@ impl DoomSession {
 
         let child = Command::new(&worker_path) // Use the full validated path
             .arg(&server_name)
-            .args(["-warp", "1", "1"])
+            .args(["-warp", "1", "1", "-net"])
             .arg("-iwad")
             .arg(wad)
             .stderr(Stdio::inherit())
@@ -103,16 +105,16 @@ impl DoomSession {
         // This also provides the receiver for HostEvents (Frames)
         let (_, command_tx) = server.accept().unwrap();
 
-        // To get frames BACK from the child, we create a channel here
-        let (event_tx, event_rx) = ipc::channel::<HostEvent>().unwrap();
+        // To get frames and events back from the child, we create 2 different channels
+        let (frame_tx, frame_rx) = ipc::channel::<Frame>().unwrap();
+        let (event_tx, event_rx) = ipc::channel::<ClientEvent>().unwrap();
 
-        // Send this event_tx to the child so it knows where to send frames
-        // (Assuming you've updated your worker's logic to receive this)
+        // Register the frame communication channel
         command_tx
-            .send(GuestCommand::RegisterEventPipe { event_tx })
+            .send(ServerCommand::RegisterPipes { frame_tx, event_tx })
             .ok();
 
-        Self::spawn(id, child, command_tx, event_rx)
+        Self::spawn(id, child, command_tx, frame_rx, event_rx)
     }
 
     #[must_use]
@@ -123,8 +125,9 @@ impl DoomSession {
     fn spawn(
         id: i32,
         child: Child,
-        input_tx: IpcSender<GuestCommand>,
-        event_rx: IpcReceiver<HostEvent>,
+        input_tx: IpcSender<ServerCommand>,
+        frame_rx: IpcReceiver<Frame>,
+        event_rx: IpcReceiver<ClientEvent>,
     ) -> Self {
         let latest_frame = Arc::new(Mutex::new(None));
         let frame_store = Arc::clone(&latest_frame);
@@ -132,13 +135,9 @@ impl DoomSession {
         // ONLY ONE THREAD NEEDED: Reading frames from IPC
         std::thread::spawn(move || {
             // IpcReceiver::recv is blocking, perfect for a dedicated thread
-            while let Ok(event) = event_rx.recv() {
-                match event {
-                    HostEvent::Frame(frame) => {
-                        let mut lock = frame_store.lock().unwrap();
-                        *lock = Some(frame);
-                    }
-                }
+            while let Ok(frame) = frame_rx.recv() {
+                let mut lock = frame_store.lock().unwrap();
+                *lock = Some(frame);
             }
         });
 
@@ -152,12 +151,12 @@ impl DoomSession {
         }
     }
 
-    pub fn set_input(&mut self, input: doom_protocol::Input, pressed: bool) {
+    pub fn set_input(&mut self, input: Input, pressed: bool) {
         if !self.active || self.pressed_keys.contains(&input) == pressed {
             return;
         }
 
-        let _ = self.input_tx.send(GuestCommand::Input { input, pressed });
+        let _ = self.input_tx.send(ServerCommand::Input { input, pressed });
         if pressed {
             self.pressed_keys.push(input);
         } else {
@@ -165,7 +164,7 @@ impl DoomSession {
         }
     }
 
-    pub fn toggle_input(&mut self, input: doom_protocol::Input) {
+    pub fn toggle_input(&mut self, input: Input) {
         let is_pressed = self.pressed_keys.contains(&input);
         self.set_input(input, !is_pressed);
     }
@@ -177,13 +176,21 @@ impl DoomSession {
         }
 
         self.active = active;
-        let _ = self.input_tx.send(GuestCommand::State { active });
+        let _ = self.input_tx.send(ServerCommand::State { active });
         true
     }
 
     pub fn set_mouse_delta(&mut self, delta: i16) -> bool {
-        let _ = self.input_tx.send(GuestCommand::RotationDelta(delta));
+        let _ = self.input_tx.send(ServerCommand::RotationDelta(delta));
         true
+    }
+
+    pub fn send_cmd_bundle(&mut self, bundle: Vec<TicCmd>) {
+        let _ = self.input_tx.send(ServerCommand::NetCmdBundle(bundle));
+    }
+
+    pub fn add_player(&mut self, player_id: i32) {
+        let _ = self.input_tx.send(ServerCommand::NetJoin { id: player_id });
     }
 
     /// Binds a map to view this session
@@ -463,6 +470,7 @@ fn handle_controller_move(
         } else {
             f > MOVE_ON
         };
+
         let back_on = if controller.move_state == MoveState::Back {
             f < -MOVE_OFF
         } else {
@@ -554,6 +562,12 @@ fn update_session_active_from_held_item(
                 commands.entity(player).remove::<DoomController>();
             }
         }
+    }
+}
+
+fn send_client_ticks(mut commands: Commands, mut q: Query<(Entity, &mut DoomSession)>) {
+    for (player, mut session) in &mut q {
+        session.send_cmd_bundle(Vec::new());
     }
 }
 

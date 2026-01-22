@@ -4,7 +4,7 @@ use doom_server::{
     plugins::{
         chat::ChatPlugin,
         command::DoomCommandPlugin,
-        doom::{DoomPlugin, DoomSessionDirectory, DoomSessionRegistry},
+        doom::{DoomPlugin, DoomSession, DoomSessionDirectory, DoomSessionRegistry},
         hotbar::HotbarPlugin,
         queue::{EnqueuePlayer, PlayerAdmitted, QueuePlugin},
     },
@@ -89,6 +89,7 @@ fn init_clients(
         ),
         Added<Client>,
     >,
+    mut sessions: Query<&mut DoomSession>,
     layers: Query<Entity, (With<ChunkLayer>, With<EntityLayer>)>,
 ) {
     for (
@@ -112,6 +113,13 @@ fn init_clients(
         permissions.add("doom.admin");
 
         let (session, map) = d_registry.create_session("doom.wad");
+
+        // Add player to other peoples' multiplayer sessions for now
+        for mut s in &mut sessions {
+            s.add_player(session.id().abs() - 1);
+            println!("Adding player {} for session: {}", s.id(), session.id());
+        }
+
         d_directory.insert(entity, session.id());
         commands.entity(entity).insert(session);
 

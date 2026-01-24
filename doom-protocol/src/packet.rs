@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{MAP_HEIGHT, MAP_WIDTH};
+use crate::{MAP_HEIGHT, MAP_WIDTH, MAX_PLAYERS};
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
 pub struct TicCmd {
     pub maketic: i32,   // The tick this command was generated at
     pub player_id: i32, // The player that generated this command
@@ -47,6 +47,13 @@ pub struct DoomGameSettings {
 
     // Hexen classes (ensure NET_MAXPLAYERS matches C, usually 4 or 8)
     pub player_classes: [i32; 8],
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
+pub struct CmdBundle {
+    pub maketic: i32,
+    pub present: [bool; MAX_PLAYERS],
+    pub cmds: [TicCmd; MAX_PLAYERS],
 }
 
 #[derive(Debug, Clone, Copy)]

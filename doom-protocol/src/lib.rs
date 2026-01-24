@@ -1,7 +1,7 @@
 use ipc_channel::ipc::IpcSender;
 use serde::{Deserialize, Serialize};
 
-use crate::packet::{Frame, Input, TicCmd};
+use crate::packet::{CmdBundle, Frame, Input, TicCmd};
 
 pub mod packet;
 pub mod palette;
@@ -9,6 +9,7 @@ pub mod util;
 
 pub const MAP_WIDTH: usize = 128;
 pub const MAP_HEIGHT: usize = 128;
+pub const MAX_PLAYERS: usize = 4;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ServerCommand {
@@ -25,7 +26,10 @@ pub enum ServerCommand {
         frame_tx: IpcSender<Frame>,
         event_tx: IpcSender<ClientEvent>,
     },
-    NetCmdBundle(Vec<TicCmd>),
+    NetSetLocal {
+        id: i32,
+    },
+    NetCmdBundle(CmdBundle),
     NetJoin {
         id: i32,
     },

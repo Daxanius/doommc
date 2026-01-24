@@ -1,4 +1,4 @@
-use doom_protocol::packet::TicCmd;
+use doom_protocol::packet::{CmdBundle, TicCmd};
 use doomgeneric::client::{DoomInputPacketRaw, MAX_PLAYERS};
 
 pub fn packet_to_ticcmd(packet: &DoomInputPacketRaw, maketic: i32, player_id: i32) -> TicCmd {
@@ -42,8 +42,22 @@ pub fn ticcmds_to_bundle(
 
     for cmd in packet {
         player_mask[cmd.player_id as usize] = 1;
-        inputs[cmd.player_id as usize] = tccmd_to_packet(&cmd);
+        inputs[cmd.player_id as usize] = tccmd_to_packet(cmd);
     }
 
     (inputs, player_mask)
+}
+
+pub fn bundle_to_raw(
+    bundle: &CmdBundle,
+) -> ([DoomInputPacketRaw; MAX_PLAYERS], [i32; MAX_PLAYERS]) {
+    let mut inputs = [DoomInputPacketRaw::default(); MAX_PLAYERS];
+    let mut mask = [0i32; MAX_PLAYERS];
+
+    for i in 0..MAX_PLAYERS {
+        mask[i] = i32::from(bundle.present[i]);
+        inputs[i] = tccmd_to_packet(&bundle.cmds[i]);
+    }
+
+    (inputs, mask)
 }

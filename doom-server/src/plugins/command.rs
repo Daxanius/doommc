@@ -10,11 +10,8 @@ use valence::{
     prelude::*,
 };
 
-use crate::plugins::doom::DoomSession;
-use crate::{
-    plugins::doom::{DoomSessionDirectory, DoomSessionRegistry},
-    extensions::inventory::InventoryExt,
-};
+use crate::extensions::inventory::InventoryExt;
+use crate::plugins::doom::session::{DoomSession, DoomSessionDirectory, DoomSessionRegistry};
 
 macro_rules! require_single_player_entity {
     ($selector:expr, $usernames:expr, $sender:expr, $invalid:expr) => {{

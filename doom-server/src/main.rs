@@ -4,7 +4,10 @@ use doom_server::{
     plugins::{
         chat::ChatPlugin,
         command::DoomCommandPlugin,
-        doom::{DoomPlugin, DoomSession, DoomSessionDirectory, DoomSessionRegistry},
+        doom::{
+            session::{DoomSession, DoomSessionDirectory, DoomSessionRegistry},
+            DoomPluginBundle,
+        },
         hotbar::HotbarPlugin,
         queue::{EnqueuePlayer, PlayerAdmitted, QueuePlugin},
     },
@@ -30,7 +33,7 @@ fn main() {
         })
         .add_plugins((
             DefaultPlugins,
-            DoomPlugin,
+            DoomPluginBundle,
             ChatPlugin,
             HotbarPlugin,
             DoomCommandPlugin,
@@ -44,6 +47,7 @@ fn main() {
         .run();
 }
 
+// Create the world
 fn setup(
     mut commands: Commands,
     server: Res<Server>,
@@ -70,6 +74,7 @@ fn setup(
     commands.spawn(layer);
 }
 
+// When a player connects, create a doom session for them
 #[allow(clippy::type_complexity)]
 fn init_clients(
     mut commands: Commands,
@@ -112,12 +117,13 @@ fn init_clients(
         *game_mode = GameMode::Creative;
         permissions.add("doom.admin");
 
-        let (session, map) = d_registry.create_session("doom.wad");
+        let (mut session, map) = d_registry.create_session("doom.wad");
+        session.add_player(session.id().abs() - 1);
 
         // Add player to other peoples' multiplayer sessions for now
         for mut s in &mut sessions {
             s.add_player(session.id().abs() - 1);
-            println!("Adding player {} for session: {}", s.id(), session.id());
+            println!("Adding player {} for session: {}", session.id(), s.id());
         }
 
         d_directory.insert(entity, session.id());

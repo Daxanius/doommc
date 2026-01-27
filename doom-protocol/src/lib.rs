@@ -10,6 +10,7 @@ pub mod util;
 pub const MAP_WIDTH: usize = 128;
 pub const MAP_HEIGHT: usize = 128;
 pub const MAX_PLAYERS: usize = 4;
+pub const BACKUP_TICS: usize = 128;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ServerCommand {

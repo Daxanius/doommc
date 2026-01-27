@@ -1,5 +1,5 @@
 use doom_protocol::{
-    ClientEvent, ServerCommand,
+    BACKUP_TICS, ClientEvent, ServerCommand,
     packet::{CmdBundle, Frame, TicCmd},
 };
 use doom_worker::utils::{bundle_to_raw, packet_to_ticcmd, ticcmds_to_bundle};
@@ -12,7 +12,6 @@ use doomgeneric::{
     input::KeyData,
 };
 use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
-use std::collections::BTreeMap;
 use std::collections::VecDeque;
 
 struct DoomContext {
@@ -20,8 +19,7 @@ struct DoomContext {
     frame_tx: IpcSender<Frame>,
     event_tx: IpcSender<ClientEvent>,
     key_queue: VecDeque<KeyData>,
-    expected_maketic: Option<i32>,
-    pending: BTreeMap<i32, CmdBundle>,
+    pending: VecDeque<CmdBundle>,
     prev_present: [bool; MAX_PLAYERS],
     absent_ticks: [u8; MAX_PLAYERS],
     delta: i16,
@@ -38,9 +36,8 @@ impl DoomContext {
             command_rx,
             frame_tx,
             event_tx,
-            key_queue: VecDeque::new(),
-            expected_maketic: None,
-            pending: BTreeMap::new(),
+            key_queue: VecDeque::with_capacity(BACKUP_TICS),
+            pending: VecDeque::with_capacity(BACKUP_TICS),
             prev_present: [false; MAX_PLAYERS],
             absent_ticks: [0; MAX_PLAYERS],
             active: true,
@@ -68,10 +65,7 @@ impl DoomContext {
                     self.delta += rotation;
                 }
                 ServerCommand::NetCmdBundle(bundle) => {
-                    if self.expected_maketic.is_none() {
-                        self.expected_maketic = Some(bundle.maketic);
-                    }
-                    self.pending.insert(bundle.maketic, bundle);
+                    self.pending.push_back(bundle);
                 }
                 ServerCommand::NetJoin { id } => unsafe { DG_CL_SpawnPlayer(id) },
                 ServerCommand::NetLeave { id } => unsafe { DG_CL_RemovePlayer(id) },
@@ -91,10 +85,7 @@ impl DoomContext {
                     eprintln!("Attempt to register event pipe after creation!");
                 }
                 Ok(ServerCommand::NetCmdBundle(bundle)) => {
-                    if self.expected_maketic.is_none() {
-                        self.expected_maketic = Some(bundle.maketic);
-                    }
-                    self.pending.insert(bundle.maketic, bundle);
+                    self.pending.push_back(bundle);
                 }
                 Ok(ServerCommand::NetJoin { id }) => unsafe { DG_CL_SpawnPlayer(id) },
                 Ok(ServerCommand::NetLeave { id }) => unsafe { DG_CL_RemovePlayer(id) },
@@ -111,41 +102,6 @@ impl DoomContext {
         }
     }
 
-    fn wait_until_tick(&mut self) {
-        loop {
-            let Some(exp) = self.expected_maketic else {
-                // wait for first bundle
-                match self.command_rx.recv() {
-                    Ok(ServerCommand::NetCmdBundle(b)) => {
-                        self.expected_maketic = Some(b.maketic);
-                        self.pending.insert(b.maketic, b);
-                    }
-                    Ok(ServerCommand::NetJoin { id }) => unsafe { DG_CL_SpawnPlayer(id) },
-                    Ok(ServerCommand::NetLeave { id }) => unsafe { DG_CL_RemovePlayer(id) },
-                    Ok(ServerCommand::NetSetLocal { id }) => unsafe { DG_CL_SetLocalPlayer(id) },
-                    Ok(_) => (),
-                    Err(_) => return,
-                }
-                continue;
-            };
-
-            if self.pending.contains_key(&exp) {
-                return;
-            }
-
-            match self.command_rx.recv() {
-                Ok(ServerCommand::NetCmdBundle(b)) => {
-                    self.pending.insert(b.maketic, b);
-                }
-                Ok(ServerCommand::NetJoin { id }) => unsafe { DG_CL_SpawnPlayer(id) },
-                Ok(ServerCommand::NetLeave { id }) => unsafe { DG_CL_RemovePlayer(id) },
-                Ok(ServerCommand::NetSetLocal { id }) => unsafe { DG_CL_SetLocalPlayer(id) },
-                Ok(_) => (),
-                Err(_) => return,
-            }
-        }
-    }
-
     fn send_frame(&mut self, frame: &Frame) {
         if let Err(e) = self.frame_tx.send(*frame) {
             eprintln!("Failed to send frame over IPC: {e}");
@@ -155,47 +111,10 @@ impl DoomContext {
 
 impl DoomGeneric for DoomContext {
     fn draw_frame(&mut self, screen_buffer: &[u8], xres: usize, yres: usize) {
-        const ABSENT_MAX: u8 = 100;
-
         self.pump_messages();
-        self.wait_until_tick();
 
         if !self.active {
             self.wait_until_resumed();
-        }
-
-        let exp = self.expected_maketic.unwrap();
-        let bundle = self.pending.remove(&exp).unwrap();
-        self.expected_maketic = Some(exp + 1);
-
-        for i in 0..MAX_PLAYERS {
-            let was = self.prev_present[i];
-            let now = bundle.present[i];
-            if now {
-                self.absent_ticks[i] = 0;
-            } else {
-                self.absent_ticks[i] += 1;
-            }
-
-            if !was && now {
-                unsafe {
-                    DG_CL_SpawnPlayer(i as i32);
-                }
-            }
-
-            if self.absent_ticks[i] >= ABSENT_MAX {
-                unsafe {
-                    self.absent_ticks[i] = 0;
-                    DG_CL_RemovePlayer(i as i32);
-                }
-            }
-        }
-        self.prev_present = bundle.present;
-
-        unsafe {
-            // Convert to raw arrays for C
-            let (inputs, mask) = bundle_to_raw(&bundle);
-            DG_CL_SetCmdBundle(inputs.as_ptr(), mask.as_ptr());
         }
 
         let frame = Frame::from_framebuffer(screen_buffer, xres, yres);
@@ -227,6 +146,44 @@ impl DoomGeneric for DoomContext {
         let _ = self.event_tx.send(ClientEvent::TicCmd(packet_to_ticcmd(
             cmd, maketic, player_id,
         )));
+    }
+
+    fn update_client(&mut self) {
+        const ABSENT_MAX: u8 = 35;
+
+        self.pump_messages();
+
+        while let Some(bundle) = self.pending.pop_front() {
+            for i in 0..MAX_PLAYERS {
+                let was = self.prev_present[i];
+                let now = bundle.present[i];
+                if now {
+                    self.absent_ticks[i] = 0;
+                } else {
+                    self.absent_ticks[i] += 1;
+                }
+
+                if !was && now {
+                    unsafe {
+                        DG_CL_SpawnPlayer(i as i32);
+                    }
+                }
+
+                if self.absent_ticks[i] >= ABSENT_MAX {
+                    unsafe {
+                        self.absent_ticks[i] = 0;
+                        DG_CL_RemovePlayer(i as i32);
+                    }
+                }
+            }
+            self.prev_present = bundle.present;
+
+            unsafe {
+                // Convert to raw arrays for C
+                let (inputs, mask) = bundle_to_raw(&bundle);
+                DG_CL_SetCmdBundle(bundle.maketic, inputs.as_ptr(), mask.as_ptr());
+            }
+        }
     }
 }
 

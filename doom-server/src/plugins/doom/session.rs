@@ -2,8 +2,7 @@ use doom_protocol::packet::{CmdBundle, Frame, Input, TicCmd};
 use doom_protocol::{ClientEvent, ServerCommand};
 use ipc_channel::ipc::{self, IpcOneShotServer, IpcReceiver, IpcSender};
 use rand::seq::IteratorRandom as _;
-use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::env;
 use std::process::Child;
 use std::process::{Command, Stdio};
@@ -41,7 +40,7 @@ pub struct DoomSession {
     /// The latest frame received from the worker
     pub latest_frame: Arc<Mutex<Option<Frame>>>,
 
-    pub received_command: Arc<Mutex<Option<TicCmd>>>,
+    pub received_commands: Arc<Mutex<VecDeque<TicCmd>>>,
 
     /// Channel to send inputs to the worker
     pub input_tx: IpcSender<ServerCommand>,
@@ -117,8 +116,8 @@ impl DoomSession {
         let latest_frame = Arc::new(Mutex::new(None));
         let frame_store = Arc::clone(&latest_frame);
 
-        let received_command = Arc::new(Mutex::new(None));
-        let command_store = Arc::clone(&received_command);
+        let received_commands = Arc::new(Mutex::new(VecDeque::with_capacity(128)));
+        let command_store = Arc::clone(&received_commands);
 
         // Reading frames from IPC
         std::thread::spawn(move || {
@@ -136,7 +135,7 @@ impl DoomSession {
                 match event {
                     ClientEvent::TicCmd(tic_cmd) => {
                         let mut lock = command_store.lock().unwrap();
-                        *lock = Some(tic_cmd);
+                        lock.push_back(tic_cmd);
                     }
                 }
             }
@@ -146,7 +145,7 @@ impl DoomSession {
             id,
             active: false,
             latest_frame,
-            received_command,
+            received_commands,
             input_tx,
             child_handle: child,
             pressed_keys: Vec::new(),

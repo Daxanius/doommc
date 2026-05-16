@@ -1,9 +1,11 @@
 use valence::prelude::*;
 
 use crate::plugins::doom::{
-    input::DoomInputPlugin, net::DoomNetPlugin, session::DoomSessionPlugin, video::DoomVideoPlugin,
+    command::DoomCommandPlugin, input::DoomInputPlugin, net::DoomNetPlugin,
+    session::DoomSessionPlugin, video::DoomVideoPlugin,
 };
 
+pub mod command;
 pub mod input;
 pub mod net;
 pub mod session;
@@ -22,7 +24,8 @@ impl Plugin for DoomPluginBundle {
             DoomSessionPlugin,
             DoomVideoPlugin,
             DoomInputPlugin,
-            DoomNetPlugin
+            DoomNetPlugin,
+            DoomCommandPlugin
         ));
     }
 }

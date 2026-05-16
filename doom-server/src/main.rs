@@ -3,7 +3,6 @@ use std::{net::SocketAddr, num::NonZero};
 use doom_server::{
     plugins::{
         chat::ChatPlugin,
-        command::DoomCommandPlugin,
         doom::{
             session::{DoomSession, DoomSessionDirectory, DoomSessionRegistry},
             DoomPluginBundle,
@@ -36,7 +35,6 @@ fn main() {
             DoomPluginBundle,
             ChatPlugin,
             HotbarPlugin,
-            DoomCommandPlugin,
             QueuePlugin { capacity: 10 },
         ))
         .add_systems(Startup, setup)

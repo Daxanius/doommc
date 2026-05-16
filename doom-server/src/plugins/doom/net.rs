@@ -14,97 +14,169 @@ impl Plugin for DoomNetPlugin {
     fn build(&self, app: &mut App) {
         #[rustfmt::skip]
         app
-        .insert_resource(DoomNetState::default())
         .add_systems(Update, (
-            update_presence,
+            party_presence,
             collect_cmds,
             send_client_ticks,
         ));
     }
 }
 
-#[derive(Resource, Default)]
-pub struct DoomNetState {
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DoomPartyId(pub Uuid);
+
+#[derive(Component, Default)]
+pub struct DoomTickStream {
     pub next_tic: i32,
     pub present: [bool; MAX_PLAYERS],
-    pub absent_ticks: [u8; MAX_PLAYERS],
     pub last_cmd: [TicCmd; MAX_PLAYERS],
     pub pending: [TicCmd; MAX_PLAYERS],
 }
 
-fn update_presence(mut net: ResMut<DoomNetState>, mut q: Query<&mut DoomSession>) {
-    const GRACE: u8 = 35;
-    let mut seen = [false; MAX_PLAYERS];
+pub struct DoomPartyInvite {
+    pub target: Entity,
+    pub created_tick: i64,
+}
 
-    for mut session in &mut q {
-        let id = session.id().unsigned_abs() as usize - 1;
+#[derive(Component)]
+pub struct DoomParty {
+    pub wad: String,
+    pub max_players: usize,
+    pub started: bool,
+    pub host: Entity, // who can /doom start
+    pub invites: Vec<DoomPartyInvite>,
+}
 
-        if id < MAX_PLAYERS {
-            session.set_local_player(id as i32);
-            seen[id] = true;
-        }
+impl DoomParty {
+    #[must_use]
+    pub fn is_full(&self, slot: usize) -> bool {
+        slot >= self.max_players.min(MAX_PLAYERS)
     }
 
-    for (i, &seen_i) in seen.iter().enumerate() {
-        if seen_i {
-            net.present[i] = true;
-            net.absent_ticks[i] = 0;
-        } else if net.present[i] {
-            net.absent_ticks[i] = net.absent_ticks[i].saturating_add(1);
+    pub fn start(
+        &mut self,
+        party_ent: Entity,
+        net: &mut DoomTickStream,
+        members: &Query<(Entity, &DoomPartyMember)>,
+        sessions: &mut Query<&mut DoomSession>,
+    ) -> [bool; MAX_PLAYERS] {
+        self.started = true;
+        net.next_tic = 0;
 
-            if net.absent_ticks[i] >= GRACE {
-                net.present[i] = false;
+        let mut present = [false; MAX_PLAYERS];
+        let member_list = Self::list_members(party_ent, members);
+
+        for (_e, slot) in &member_list {
+            present[*slot] = true;
+        }
+        net.present = present;
+
+        for (player_ent, slot) in member_list {
+            if let Ok(mut session) = sessions.get_mut(player_ent) {
+                session.set_local_player(slot as i32);
+                for s in 0..MAX_PLAYERS {
+                    if present[s] {
+                        session.add_player(s as i32);
+                    }
+                }
+            }
+        }
+
+        present
+    }
+
+    pub fn list_members(
+        party_ent: Entity,
+        members: &Query<(Entity, &DoomPartyMember)>,
+    ) -> Vec<(Entity, usize)> {
+        members
+            .iter()
+            .filter(|(_, m)| m.group == party_ent && m.slot < MAX_PLAYERS)
+            .map(|(e, m)| (e, m.slot))
+            .collect()
+    }
+}
+
+/// An entity inside of a doom group
+#[derive(Component)]
+pub struct DoomPartyMember {
+    pub group: Entity,
+    pub slot: usize,
+}
+
+fn party_presence(
+    mut groups: Query<(Entity, &mut DoomTickStream, &DoomParty)>,
+    members: Query<&DoomPartyMember>,
+) {
+    for (group_ent, mut net, _group) in &mut groups {
+        let mut present = [false; MAX_PLAYERS];
+
+        for m in &members {
+            if m.group == group_ent && m.slot < MAX_PLAYERS {
+                present[m.slot] = true;
+            }
+        }
+
+        net.present = present;
+    }
+}
+
+fn collect_cmds(
+    mut groups: Query<(Entity, &mut DoomTickStream, &DoomParty)>,
+    mut players: Query<(Entity, &DoomSession, &DoomPartyMember)>,
+) {
+    for (group_ent, mut net, group) in &mut groups {
+        if !group.started {
+            continue;
+        }
+
+        for (_player_ent, session, m) in &mut players {
+            if m.group != group_ent {
+                continue;
+            }
+
+            let Ok(mut lock) = session.received_commands.try_lock() else {
+                continue;
+            };
+            if let Some(mut cmd) = lock.pop_front() {
+                cmd.player_id = m.slot as i32;
+                net.pending[m.slot] = cmd;
             }
         }
     }
 }
 
-fn collect_cmds(mut net: ResMut<DoomNetState>, mut q: Query<&mut DoomSession>) {
-    for session in &mut q {
-        let player = (session.id().unsigned_abs() - 1) as usize;
-        if player >= MAX_PLAYERS {
+fn send_client_ticks(
+    mut groups: Query<(Entity, &mut DoomTickStream, &DoomParty)>,
+    mut players: Query<(&mut DoomSession, &DoomPartyMember)>,
+) {
+    for (group_ent, mut net, group) in &mut groups {
+        if !group.started {
             continue;
         }
 
-        let Ok(mut lock) = session.received_commands.try_lock() else {
-            continue;
+        let t = net.next_tic;
+
+        let mut bundle = CmdBundle {
+            maketic: t,
+            present: net.present,
+            ..Default::default()
         };
 
-        if lock.len() > 1 {
-            println!(
-                "Session {} running {} ticks ahead!",
-                session.id(),
-                lock.len()
-            );
+        for p in 0..MAX_PLAYERS {
+            bundle.cmds[p] = if net.present[p] {
+                net.pending[p]
+            } else {
+                TicCmd::default()
+            };
         }
 
-        if let Some(mut cmd) = lock.pop_front() {
-            cmd.player_id = player as i32;
-            net.pending[player] = cmd;
+        for (mut session, m) in &mut players {
+            if m.group == group_ent {
+                session.send_cmd_bundle(bundle);
+            }
         }
+
+        net.next_tic += 1;
     }
-}
-
-fn send_client_ticks(mut q: Query<&mut DoomSession>, mut net: ResMut<DoomNetState>) {
-    let t = net.next_tic;
-
-    let mut bundle = CmdBundle {
-        maketic: t,
-        present: net.present,
-        ..Default::default()
-    };
-
-    for p in 0..MAX_PLAYERS {
-        bundle.cmds[p] = if net.present[p] {
-            net.pending[p]
-        } else {
-            continue;
-        }
-    }
-
-    for mut session in &mut q {
-        session.send_cmd_bundle(bundle);
-    }
-
-    net.next_tic += 1;
 }

@@ -111,7 +111,7 @@ fn init_clients(
         *game_mode = GameMode::Creative;
         permissions.add("doom.admin");
 
-        let (session, map) = d_registry.create_session("doom.wad");
+        let (session, map) = d_registry.create_session("DOOM.WAD");
         d_directory.insert(entity, session.id());
         commands.entity(entity).insert(session);
 

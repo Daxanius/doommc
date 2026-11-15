@@ -1,5 +1,5 @@
 use doom_protocol::{Frame, GuestCommand, HostEvent};
-use doomgeneric::game::DoomGeneric;
+use doomgeneric::game::{DoomGeneric, Pixel};
 use doomgeneric::input::KeyData;
 use ipc_channel::ipc::{self, IpcReceiver, IpcSender};
 use std::collections::VecDeque;
@@ -72,7 +72,7 @@ impl DoomContext {
 }
 
 impl DoomGeneric for DoomContext {
-    fn draw_frame(&mut self, screen_buffer: &[u8], xres: usize, yres: usize) {
+    fn draw_frame(&mut self, screen_buffer: &[Pixel], xres: usize, yres: usize) {
         self.pump_messages();
 
         if !self.active {
@@ -119,7 +119,7 @@ fn main() {
     };
 
     let context = DoomContext::new(command_rx, event_tx);
-    doomgeneric::game::init(context, &args);
+    doomgeneric::game::init(&args, context);
     loop {
         doomgeneric::game::tick();
     }

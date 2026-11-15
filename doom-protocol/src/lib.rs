@@ -104,7 +104,7 @@ pub enum Input {
 
 impl Input {
     #[must_use]
-    pub fn to_keycode(&self) -> i32 {
+    pub fn to_keycode(&self) -> u8 {
         match self {
             Input::Up => 0xad,
             Input::Down => 0xaf,

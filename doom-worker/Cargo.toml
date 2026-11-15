@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-doomgeneric = { path = "../doomgeneric-rs" }
+doomgeneric = { path = "../doomgeneric-rs", features = ["cmap256"]}
 doom-protocol = { path = "../doom-protocol" }
 ipc-channel = "0.20.2"

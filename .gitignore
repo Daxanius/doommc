@@ -4,6 +4,6 @@
 
 /target
 /Cargo.lock
-*.wad
+*.[Ww][Aa][Dd]
 
 .direnv
